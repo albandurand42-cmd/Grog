@@ -194,17 +194,18 @@ async function writeNowPlayingToSupabase(track) {
     const { error: delErr } = await supabase.from('now_playing').delete().not('id', 'is', null);
     if (delErr) console.warn('[now_playing] Erreur delete :', delErr);
     const { data, error } = await supabase.from('now_playing').insert({
-  spotify_track_id: track.spotify_track_id,
-  title: track.title,
-  artist: track.artist,
-  album: track.album,
-  image_url: track.image_url,
-  duration_ms: track.duration_ms,
-  progress_ms: track.progress_ms,
-  is_playing: track.is_playing,
-  synced_at: new Date().toISOString(),
+      spotify_track_id: track.spotify_track_id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      image_url: track.image_url,
+      duration_ms: track.duration_ms,
+      progress_ms: track.progress_ms,
+      is_playing: track.is_playing,
+      synced_at: new Date().toISOString(),
     }).select();
     if (error) throw error;
+    console.log('[now_playing] écrit:', track.title, track.duration_ms, track.progress_ms, track.is_playing);
     console.log('[now_playing] Écriture OK :', data);
   } catch (err) {
     console.error('Erreur écriture now_playing :', err);

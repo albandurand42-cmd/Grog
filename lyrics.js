@@ -57,7 +57,6 @@ function scoreResult(item, track) {
 }
 
 async function fetchJson(url) {
-  console.log('[LYRICS] URL requête :', url);
   const res = await fetch(url, {
     headers: {
       Accept: 'application/json',
@@ -68,6 +67,12 @@ async function fetchJson(url) {
 }
 
 async function exactSearch(track) {
+  // Ne pas appeler /api/get si duration est absent ou <= 0, ou si album est absent
+  if (!track.album_name || typeof track.duration_ms !== 'number' || track.duration_ms <= 0) {
+    console.log('[LYRICS] Recherche exacte ignorée: album absent ou duration invalide');
+    return null;
+  }
+
   const params = new URLSearchParams({
     track_name: track.track_name,
     artist_name: track.artist_name,
@@ -75,16 +80,25 @@ async function exactSearch(track) {
     duration: String(Math.round(track.duration_ms / 1000)),
   });
   const url = `${LRCLIB_BASE}/get?${params.toString()}`;
-  console.log('[LYRICS] Recherche exacte LRCLIB/get :', url);
-  const res = await fetchJson(url);
-  if (res.status === 404) {
-    console.log('[LYRICS] Aucun résultat exact (404)');
+  console.log('[LYRICS] URL /get: ' + url);
+  
+  try {
+    const res = await fetchJson(url);
+    if (res.status === 404) {
+      console.log('[LYRICS] Aucun résultat exact (404)');
+      return null;
+    }
+    if (!res.ok) {
+      console.warn(`[LYRICS] /get HTTP ${res.status}`);
+      return null;
+    }
+    const result = await res.json();
+    console.log('[LYRICS] Réponse /get:', result);
+    return result?.syncedLyrics ? result : null;
+  } catch (err) {
+    console.warn('[LYRICS] exactSearch erreur, fallback à search:', err.message);
     return null;
   }
-  if (!res.ok) throw new Error(`LRCLIB HTTP ${res.status}`);
-  const result = await res.json();
-  console.log('[LYRICS] Réponse /get :', result);
-  return result?.syncedLyrics ? result : null;
 }
 
 async function fallbackSearch(track) {
@@ -93,16 +107,25 @@ async function fallbackSearch(track) {
     artist_name: track.artist_name,
   });
   const url = `${LRCLIB_BASE}/search?${params.toString()}`;
-  console.log('[LYRICS] Fallback LRCLIB/search :', url);
-  const res = await fetchJson(url);
-  if (res.status === 404) {
-    console.log('[LYRICS] Aucun résultat fallback (404)');
+  console.log('[LYRICS] URL /search: ' + url);
+  
+  try {
+    const res = await fetchJson(url);
+    if (res.status === 404) {
+      console.log('[LYRICS] Aucun résultat /search (404)');
+      return [];
+    }
+    if (!res.ok) {
+      console.warn(`[LYRICS] /search HTTP ${res.status}`);
+      return [];
+    }
+    const results = await res.json();
+    console.log('[LYRICS] Réponse /search:', results);
+    return Array.isArray(results) ? results : (results ? [results] : []);
+  } catch (err) {
+    console.warn('[LYRICS] fallbackSearch erreur:', err.message);
     return [];
   }
-  if (!res.ok) throw new Error(`LRCLIB HTTP ${res.status}`);
-  const results = await res.json();
-  console.log('[LYRICS] Réponse /search :', results);
-  return Array.isArray(results) ? results : (results ? [results] : []);
 }
 
 function chooseBest(results, track) {
@@ -115,11 +138,11 @@ function chooseBest(results, track) {
 export async function getSyncedLyrics(track) {
   const key = `${track.spotify_track_id || ''}::${track.track_name || ''}::${track.artist_name || ''}::${track.duration_ms || ''}`;
   if (memoryCache.has(key)) {
-    console.log('[LYRICS] Cache hit pour :', track.track_name, track.artist_name);
+    console.log('[LYRICS] Cache hit:', track.track_name, track.artist_name);
     return memoryCache.get(key);
   }
 
-  console.log('[LYRICS] Recherche nouvelle :', {
+  console.log('[LYRICS] Recherche nouvelle:', {
     track_name: track.track_name,
     artist_name: track.artist_name,
     album_name: track.album_name,
@@ -130,35 +153,32 @@ export async function getSyncedLyrics(track) {
     const exact = await exactSearch(track);
     if (exact?.syncedLyrics) {
       const lines = parseLrc(exact.syncedLyrics);
-      console.log('[LYRICS] Nombre de lignes parsées (exact) :', lines.length);
+      console.log('[LYRICS] ' + lines.length + ' lignes synchronisées (exact)');
       if (lines.length) {
-        console.log('[LYRICS] ✓ Paroles synchronisées trouvées (exact) :', lines.length, 'lignes');
         const payload = { type: 'synced', lines, plainLyrics: exact.plainLyrics || null };
         memoryCache.set(key, payload);
         return payload;
       }
     }
 
+    console.log('[LYRICS] Recherche fallback');
     const results = await fallbackSearch(track);
-    console.log('[LYRICS] Nombre de résultats fallback :', results.length);
+    console.log('[LYRICS] ' + results.length + ' résultats /search');
     const best = chooseBest(results, track);
-    console.log('[LYRICS] Meilleur résultat fallback :', {
-      trackName: best?.trackName,
-      artistName: best?.artistName,
-      duration: best?.duration,
-      hasSyncedLyrics: !!best?.syncedLyrics,
-    });
+    if (best) {
+      console.log('[LYRICS] Meilleur résultat trouvé:', best.trackName, '-', best.artistName);
+    }
+    
     if (!best) {
-      console.log('[LYRICS] ✗ Aucun résultat après fallback');
+      console.log('[LYRICS] Aucun résultat');
       memoryCache.set(key, null);
       return null;
     }
 
     if (best.syncedLyrics) {
       const lines = parseLrc(best.syncedLyrics);
-      console.log('[LYRICS] Nombre de lignes parsées (fallback) :', lines.length);
+      console.log('[LYRICS] ' + lines.length + ' lignes synchronisées');
       if (lines.length) {
-        console.log('[LYRICS] ✓ Paroles synchronisées trouvées (fallback) :', lines.length, 'lignes');
         const payload = { type: 'synced', lines, plainLyrics: best.plainLyrics || null };
         memoryCache.set(key, payload);
         return payload;
@@ -166,17 +186,17 @@ export async function getSyncedLyrics(track) {
     }
 
     if (best.plainLyrics) {
-      console.log('[LYRICS] Paroles non-synchronisées (plain) disponibles');
+      console.log('[LYRICS] Paroles non-synchronisées');
       const payload = { type: 'plain', text: best.plainLyrics };
       memoryCache.set(key, payload);
       return payload;
     }
 
-    console.log('[LYRICS] ✗ Paroles indisponibles');
+    console.log('[LYRICS] Aucune parole trouvée');
     memoryCache.set(key, null);
     return null;
   } catch (error) {
-    console.error('[LYRICS] Erreur LRCLIB :', error);
+    console.error('[LYRICS] Erreur:', error);
     memoryCache.set(key, null);
     return null;
   }

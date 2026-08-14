@@ -158,17 +158,18 @@ async function applyTrack(row) {
   _syncedAt = row.synced_at ? new Date(row.synced_at).getTime() : Date.now();
   _baseSyncTime = Date.now();
 
-  console.log('[TV] Données now_playing:', {
-    title: row.title,
-    duration_ms: row.duration_ms,
-    progress_ms: row.progress_ms,
-    is_playing: row.is_playing,
-    synced_at: row.synced_at,
-  });
+  console.log('[TV] données:', row.title, row.duration_ms, row.progress_ms, row.is_playing);
 
-  await loadLyricsForTrack(row);
+  // Ne charger les paroles que si duration_ms est un nombre > 0
+  if (typeof row.duration_ms === 'number' && row.duration_ms > 0) {
+    await loadLyricsForTrack(row);
+  } else {
+    _lyricsState = null;
+    if (lyricsEl) lyricsEl.innerHTML = '<p class="lyric-line lyric-active">Durée indisponible - paroles désactivées</p>';
+  }
+
   tick();
-  if (_isPlaying) startTick(); else stopTick();
+  if (_isPlaying && _durationMs > 0) startTick(); else stopTick();
 }
 
 async function loadCurrent() {
