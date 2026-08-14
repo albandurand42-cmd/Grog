@@ -1,10 +1,8 @@
 // Contrôleur principal de la page invité (index.html).
 
-console.log('GROG app.js chargé');
-
 import { searchTracks } from './spotify.js';
 import { submitRequest, fetchPendingRequests, subscribeToQueue, getSessionId } from './queue.js';
-import { canVote, recordVote, VOLUME_WINDOW_SECONDS } from './votes.js';
+import { canVote, recordVote, fetchVolumeScore } from './votes.js';
 import { supabase } from './supabase.js';
 import { escHtml } from './utils.js';
 
@@ -67,6 +65,9 @@ async function onRequestClick(track, articleEl) {
   btn.disabled = true;
   btn.textContent = '…';
   const guestName = guestNameInput ? guestNameInput.value.trim() : '';
+  // Remove any previous error message
+  const prevErr = searchResults.nextElementSibling;
+  if (prevErr && prevErr.classList.contains('error-state')) prevErr.remove();
   try {
     await submitRequest(track, guestName);
     btn.textContent = '✓ Demandé';
@@ -130,13 +131,7 @@ function handleRealtimeChange() {
 
 async function loadVolumeScore() {
   try {
-    const since = new Date(Date.now() - VOLUME_WINDOW_SECONDS * 1000).toISOString();
-    const { data, error } = await supabase
-      .from('volume_votes')
-      .select('value')
-      .gte('created_at', since);
-    if (error) throw error;
-    const score = (data ?? []).reduce((sum, r) => sum + (r.value ?? 0), 0);
+    const score = await fetchVolumeScore();
     renderVolumeScore(score);
   } catch (err) {
     console.error('Erreur chargement score volume :', err);

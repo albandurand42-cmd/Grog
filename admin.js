@@ -5,7 +5,7 @@ import { startPKCE, handleCallback, getStoredTokens, logout } from './auth.js';
 import { fetchPendingRequests, subscribeToQueue } from './queue.js';
 import { supabase } from './supabase.js';
 import { escHtml } from './utils.js';
-import { VOLUME_WINDOW_SECONDS } from './votes.js';
+import { fetchVolumeScore } from './votes.js';
 
 // ----- Sélecteurs DOM -----
 const authStatus = document.getElementById('auth-status');
@@ -156,8 +156,8 @@ async function setNowPlaying(row, articleEl) {
   const btn = articleEl.querySelector('[data-action="play"]');
   btn.disabled = true;
   try {
-    // Supprimer l'entrée précédente et insérer la nouvelle
-    await supabase.from('now_playing').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    // Delete the current now_playing row(s) using a date filter
+    await supabase.from('now_playing').delete().gte('started_at', '1970-01-01');
     const { error } = await supabase.from('now_playing').insert({
       spotify_track_id: row.spotify_id ?? null,
       title: row.title,
@@ -183,13 +183,7 @@ function handleRealtimeChange() {
 
 async function loadVolumeScore() {
   try {
-    const since = new Date(Date.now() - VOLUME_WINDOW_SECONDS * 1000).toISOString();
-    const { data, error } = await supabase
-      .from('volume_votes')
-      .select('value')
-      .gte('created_at', since);
-    if (error) throw error;
-    const score = (data ?? []).reduce((sum, r) => sum + (r.value ?? 0), 0);
+    const score = await fetchVolumeScore();
     if (volScoreAdmin) volScoreAdmin.textContent = (score > 0 ? '+' : '') + score;
   } catch (err) {
     console.error('Erreur score volume admin :', err);
