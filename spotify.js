@@ -1,71 +1,64 @@
-import { supabase } from './supabase.js';
+// Couche d'accès à l'API Spotify.
+// Les invités n'ont pas besoin de s'authentifier : un token est obtenu
+// via la Supabase Edge Function configurée dans config.js.
 
-let cachedToken = null;
-let tokenExpiresAt = 0;
+import { SPOTIFY_TOKEN_PROXY_URL } from './config.js';
 
-async function getSpotifyToken() {
-  // Réutilise le token tant qu'il est encore valide
-  if (cachedToken && Date.now() < tokenExpiresAt) {
-    return cachedToken;
-  }
+/** @type {string|null} */
+let _cachedToken = null;
+/** @type {number} Token expiry (ms since epoch) */
+let _tokenExpiry = 0;
 
-  const { data, error } = await supabase.functions.invoke('spotify-token', {
-    body: {}
-  });
+/**
+ * Récupère un token Spotify valide via le proxy Edge Function.
+ * Le token est mis en cache jusqu'à expiration.
+ * @returns {Promise<string>}
+ */
+async function getToken() {
+  if (_cachedToken && Date.now() < _tokenExpiry) return _cachedToken;
 
-  if (error) {
-    console.error('Erreur Edge Function Spotify :', error);
-    throw new Error('Impossible de contacter Spotify');
-  }
+  const res = await fetch(SPOTIFY_TOKEN_PROXY_URL, { method: 'POST' });
+  if (!res.ok) throw new Error(`Token proxy error: ${res.status}`);
 
-  if (!data?.access_token) {
-    console.error('Réponse Spotify invalide :', data);
-    throw new Error('Token Spotify manquant');
-  }
-
-  cachedToken = data.access_token;
-
-  // Petite marge de sécurité de 60 secondes
-  tokenExpiresAt =
-    Date.now() + ((data.expires_in || 3600) - 60) * 1000;
-
-  return cachedToken;
+  const { access_token, expires_in } = await res.json();
+  _cachedToken = access_token;
+  // Expire 60 s avant la date réelle pour éviter les courses.
+  // Fallback à 3600 s si expires_in est absent de la réponse.
+  _tokenExpiry = Date.now() + ((expires_in ?? 3600) - 60) * 1000;
+  return _cachedToken;
 }
 
-export async function searchTracks(query) {
-  const search = query.trim();
+/**
+ * @typedef {Object} Track
+ * @property {string} id          Spotify track ID
+ * @property {string} uri         Spotify URI (spotify:track:…)
+ * @property {string} title       Nom du morceau
+ * @property {string} artist      Artiste(s) — joint par ", "
+ * @property {string|null} albumArt URL de la pochette (640px)
+ */
 
-  if (!search) {
-    return [];
-  }
+/**
+ * Recherche des morceaux sur Spotify.
+ * @param {string} query
+ * @param {number} [limit=10]
+ * @returns {Promise<Track[]>}
+ */
+export async function searchTracks(query, limit = 10) {
+  if (!query.trim()) return [];
 
-  const token = await getSpotifyToken();
+  const token = await getToken();
+  const params = new URLSearchParams({ q: query, type: 'track', limit: String(limit) });
+  const res = await fetch(`https://api.spotify.com/v1/search?${params}`, {
+    headers: { Authorization: 'Bearer ' + token },
+  });
+  if (!res.ok) throw new Error(`Spotify search error: ${res.status}`);
 
-  const response = await fetch(
-    `https://api.spotify.com/v1/search?q=${encodeURIComponent(search)}&type=track&limit=10`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.text();
-    console.error('Erreur recherche Spotify :', error);
-    throw new Error('La recherche Spotify a échoué');
-  }
-
-  const data = await response.json();
-
-  return (data.tracks?.items || []).map(track => ({
-    id: track.id,
-    spotify_track_id: track.id,
-    title: track.name,
-    artist: track.artists.map(artist => artist.name).join(', '),
-    album: track.album?.name || '',
-    image_url: track.album?.images?.[0]?.url || '',
-    uri: track.uri,
-    external_url: track.external_urls?.spotify || ''
+  const data = await res.json();
+  return (data.tracks?.items ?? []).map((item) => ({
+    id: item.id,
+    uri: item.uri,
+    title: item.name,
+    artist: item.artists.map((a) => a.name).join(', '),
+    albumArt: item.album.images?.[0]?.url ?? null,
   }));
 }

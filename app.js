@@ -1,402 +1,235 @@
+// Contrôleur principal de la page invité (index.html).
+
 import { searchTracks } from './spotify.js';
-
-import {
-  fetchPendingRequests,
-  submitRequest,
-  subscribeToQueue
-} from './queue.js';
-
+import { submitRequest, fetchPendingRequests, subscribeToQueue, getSessionId } from './queue.js';
+import { canVote, recordVote, fetchVolumeScore } from './votes.js';
 import { supabase } from './supabase.js';
+import { escHtml } from './utils.js';
 
+// ----- Sélecteurs DOM -----
+const guestNameInput = document.getElementById('guest-name');
+const searchInput = document.getElementById('search-input');
+const searchBtn = document.getElementById('search-btn');
+const searchResults = document.getElementById('search-results');
+const queueList = document.getElementById('queue-list');
+const volUp = document.getElementById('vol-up');
+const volDown = document.getElementById('vol-down');
+const volScore = document.getElementById('vol-score');
+const volHint = document.getElementById('vol-hint');
+const nowPlayingDisplay = document.getElementById('now-playing-display');
 
-const searchInput =
-  document.getElementById('spotify-search');
+// ----- Recherche Spotify -----
 
-const searchButton =
-  document.getElementById('search-button');
-
-const searchResults =
-  document.getElementById('search-results');
-
-const searchStatus =
-  document.getElementById('search-status');
-
-const requestList =
-  document.getElementById('request-list');
-
-const guestName =
-  document.getElementById('guest-name');
-
-const louderButton =
-  document.getElementById('louder-button');
-
-const quieterButton =
-  document.getElementById('quieter-button');
-
-const volumeStatus =
-  document.getElementById('volume-status');
-
-
-/* -------------------------
-   IDENTIFIANT ANONYME
-------------------------- */
-
-function getVoterId() {
-
-  let id = localStorage.getItem('grog_voter_id');
-
-  if (!id) {
-
-    id = crypto.randomUUID();
-
-    localStorage.setItem(
-      'grog_voter_id',
-      id
-    );
-  }
-
-  return id;
-}
-
-
-/* -------------------------
-   NOM FACULTATIF
-------------------------- */
-
-const savedName =
-  localStorage.getItem('grog_guest_name');
-
-if (savedName) {
-  guestName.value = savedName;
-}
-
-guestName.addEventListener(
-  'input',
-  () => {
-
-    localStorage.setItem(
-      'grog_guest_name',
-      guestName.value.trim()
-    );
-
-  }
-);
-
-
-/* -------------------------
-   RECHERCHE SPOTIFY
-------------------------- */
-
-async function runSearch() {
-
-  const query =
-    searchInput.value.trim();
-
+async function handleSearch() {
+  const query = searchInput.value.trim();
   if (!query) return;
 
-  searchStatus.textContent =
-    'Recherche...';
+  searchResults.innerHTML = '<p class="muted">Recherche en cours…</p>';
+  try {
+    const tracks = await searchTracks(query);
+    renderResults(tracks);
+  } catch (err) {
+    console.error('Erreur recherche Spotify :', err);
+    searchResults.innerHTML = `<div class="empty-state error-state">Impossible de rechercher les morceaux. Réessaie dans un instant.</div>`;
+  }
+}
+
+/**
+ * @param {import('./spotify.js').Track[]} tracks
+ */
+function renderResults(tracks) {
+  if (!tracks.length) {
+    searchResults.innerHTML = '<div class="empty-state">Aucun résultat.</div>';
+    return;
+  }
 
   searchResults.innerHTML = '';
-
-  try {
-
-    const tracks =
-      await searchTracks(query);
-
-    searchStatus.textContent =
-      tracks.length
-        ? ''
-        : 'Aucun résultat.';
-
-    tracks.forEach(track => {
-
-      const card =
-        document.createElement('div');
-
-      card.className =
-        'request-card';
-
-      card.innerHTML = `
-        ${
-          track.image_url
-            ? `<img
-                src="${track.image_url}"
-                alt=""
-                width="70"
-                height="70"
-              >`
-            : ''
-        }
-
-        <div class="request-info">
-          <strong></strong>
-          <p class="muted"></p>
-        </div>
-
-        <button
-          type="button"
-          class="primary"
-        >
-          Demander
-        </button>
-      `;
-
-      card.querySelector('strong')
-        .textContent = track.title;
-
-      card.querySelector('p')
-        .textContent = track.artist;
-
-      card
-        .querySelector('button')
-        .addEventListener(
-          'click',
-          async event => {
-
-            const button =
-              event.currentTarget;
-
-            button.disabled = true;
-
-            button.textContent =
-              'Ajout...';
-
-            try {
-
-              const result =
-                await submitRequest(
-                  track,
-                  guestName.value.trim()
-                );
-
-              button.textContent =
-                result.existing
-                  ? 'Demande ajoutée +1'
-                  : 'Demandé ✓';
-
-              await loadRequests();
-
-            } catch (error) {
-
-              console.error(error);
-
-              button.disabled = false;
-
-              button.textContent =
-                'Erreur';
-
-            }
-
-          }
-        );
-
-      searchResults.appendChild(card);
-
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    searchStatus.textContent =
-      'Erreur pendant la recherche Spotify.';
-
+  for (const track of tracks) {
+    const article = document.createElement('article');
+    article.className = 'request-card';
+    article.innerHTML = `
+      ${track.albumArt ? `<img class="cover" src="${escHtml(track.albumArt)}" alt="pochette" width="56" height="56" loading="lazy">` : '<div class="cover placeholder" aria-hidden="true"></div>'}
+      <div class="request-info">
+        <strong>${escHtml(track.title)}</strong>
+        <span class="muted">${escHtml(track.artist)}</span>
+      </div>
+      <button type="button" class="primary request-btn" data-id="${escHtml(track.id)}">Demander</button>
+    `;
+    article.querySelector('.request-btn').addEventListener('click', () => onRequestClick(track, article));
+    searchResults.appendChild(article);
   }
-
 }
 
-
-searchButton.addEventListener(
-  'click',
-  runSearch
-);
-
-searchInput.addEventListener(
-  'keydown',
-  event => {
-
-    if (event.key === 'Enter') {
-      runSearch();
-    }
-
-  }
-);
-
-
-/* -------------------------
-   LISTE DES DEMANDES
-------------------------- */
-
-async function loadRequests() {
-
+async function onRequestClick(track, articleEl) {
+  const btn = articleEl.querySelector('.request-btn');
+  btn.disabled = true;
+  btn.textContent = '…';
+  const guestName = guestNameInput ? guestNameInput.value.trim() : '';
+  // Remove any previous error message
+  const prevErr = searchResults.nextElementSibling;
+  if (prevErr && prevErr.classList.contains('error-state')) prevErr.remove();
   try {
-
-    const requests =
-      await fetchPendingRequests();
-
-    requestList.innerHTML = '';
-
-    if (!requests.length) {
-
-      requestList.innerHTML =
-        '<p class="muted">Aucun morceau demandé pour le moment.</p>';
-
-      return;
-
-    }
-
-    requests.forEach(item => {
-
-      const card =
-        document.createElement('div');
-
-      card.className =
-        'request-card';
-
-      if (item.image_url) {
-
-        const img =
-          document.createElement('img');
-
-        img.src =
-          item.image_url;
-
-        img.alt = '';
-
-        img.width = 64;
-        img.height = 64;
-
-        card.appendChild(img);
-
-      }
-
-      const info =
-        document.createElement('div');
-
-      info.className =
-        'request-info';
-
-      const title =
-        document.createElement('strong');
-
-      title.textContent =
-        item.title;
-
-      const artist =
-        document.createElement('p');
-
-      artist.className =
-        'muted';
-
-      artist.textContent =
-        item.artist;
-
-      const count =
-        document.createElement('p');
-
-      count.className =
-        'muted';
-
-      count.textContent =
-        item.request_count > 1
-          ? `🔥 ${item.request_count} demandes`
-          : '🔥 1 demande';
-
-      info.appendChild(title);
-      info.appendChild(artist);
-      info.appendChild(count);
-
-      card.appendChild(info);
-
-      requestList.appendChild(card);
-
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    requestList.innerHTML =
-      '<p class="muted">Impossible de charger les demandes.</p>';
-
-  }
-
-}
-
-
-/* -------------------------
-   VOTE VOLUME
-------------------------- */
-
-async function castVolumeVote(vote) {
-
-  const voterId =
-    getVoterId();
-
-  const existingVote =
-    localStorage.getItem(
-      'grog_volume_vote'
+    await submitRequest(track, guestName);
+    btn.textContent = '✓ Demandé';
+    btn.classList.replace('primary', 'secondary');
+  } catch (err) {
+    console.error('Erreur demande :', err);
+    btn.disabled = false;
+    btn.textContent = 'Demander';
+    searchResults.insertAdjacentHTML(
+      'afterend',
+      `<p class="muted error-state">Impossible d'ajouter cette musique. Réessaie.</p>`
     );
-
-  if (existingVote) {
-
-    volumeStatus.textContent =
-      'Tu as déjà donné ton avis 👍';
-
-    return;
-
   }
-
-  const { error } =
-    await supabase
-      .from('volume_votes')
-      .insert({
-        voter_id: voterId,
-        vote
-      });
-
-  if (error) {
-
-    console.error(error);
-
-    volumeStatus.textContent =
-      'Impossible d’enregistrer ton vote.';
-
-    return;
-
-  }
-
-  localStorage.setItem(
-    'grog_volume_vote',
-    vote
-  );
-
-  volumeStatus.textContent =
-    vote === 'louder'
-      ? '🔊 Demande “plus fort” envoyée !'
-      : '🔉 Demande “moins fort” envoyée !';
-
 }
 
+// ----- File d'attente en temps réel -----
 
-louderButton.addEventListener(
-  'click',
-  () => castVolumeVote('louder')
-);
+async function loadQueue() {
+  try {
+    const rows = await fetchPendingRequests();
+    renderQueue(rows);
+  } catch (err) {
+    console.error('Erreur chargement file :', err);
+    queueList.innerHTML = '<div class="empty-state error-state">Impossible de charger les demandes.</div>';
+  }
+}
 
-quieterButton.addEventListener(
-  'click',
-  () => castVolumeVote('quieter')
-);
+function renderQueue(rows) {
+  if (!rows.length) {
+    queueList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
+    return;
+  }
+  queueList.innerHTML = '';
+  for (const row of rows) {
+    queueList.appendChild(buildQueueItem(row));
+  }
+}
 
+function buildQueueItem(row) {
+  const article = document.createElement('article');
+  article.className = 'request-card';
+  article.dataset.id = row.id;
+  const count = row.request_count ?? 1;
+  const nameHtml = row.guest_name ? ` <span class="muted guest-name">— ${escHtml(row.guest_name)}</span>` : '';
+  article.innerHTML = `
+    ${row.album_art ? `<img class="cover" src="${escHtml(row.album_art)}" alt="pochette" width="56" height="56" loading="lazy">` : '<div class="cover placeholder" aria-hidden="true"></div>'}
+    <div class="request-info">
+      <strong>${escHtml(row.title)}</strong>${nameHtml}
+      <span class="muted">${escHtml(row.artist)}</span>
+    </div>
+    ${count > 1 ? `<span class="vote-count">${count}×</span>` : ''}
+  `;
+  return article;
+}
 
-/* -------------------------
-   REALTIME
-------------------------- */
+function handleRealtimeChange() {
+  loadQueue();
+}
 
-subscribeToQueue(
-  loadRequests
-);
+// ----- Votes volume (fenêtre glissante 2 min) -----
 
-loadRequests();
+async function loadVolumeScore() {
+  try {
+    const score = await fetchVolumeScore();
+    renderVolumeScore(score);
+  } catch (err) {
+    console.error('Erreur chargement score volume :', err);
+  }
+}
+
+function renderVolumeScore(score) {
+  const sign = score > 0 ? '+' : '';
+  volScore.textContent = sign + score;
+  if (score > 0) {
+    volHint.textContent = 'Le public demande un peu plus fort';
+  } else if (score < 0) {
+    volHint.textContent = 'Le public demande un peu moins fort';
+  } else {
+    volHint.textContent = 'Le volume semble bon';
+  }
+}
+
+async function handleVolClick(value) {
+  if (!canVote()) return;
+  recordVote();
+  // Feedback visuel immédiat
+  const btn = value > 0 ? volUp : volDown;
+  btn.disabled = true;
+  setTimeout(() => { btn.disabled = false; }, 2000);
+  try {
+    const { error } = await supabase
+      .from('volume_votes')
+      .insert({ value, session_id: getSessionId() });
+    if (error) throw error;
+    await loadVolumeScore();
+  } catch (err) {
+    console.error('Erreur vote volume :', err);
+    btn.disabled = false;
+    alert('Impossible d\'envoyer ton vote.');
+  }
+}
+
+// Refresh périodique du score (fenêtre glissante)
+setInterval(loadVolumeScore, 8000);
+
+// Realtime sur volume_votes
+supabase
+  .channel('public:volume_votes')
+  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'volume_votes' }, () => loadVolumeScore())
+  .subscribe();
+
+// ----- Now Playing -----
+
+async function loadNowPlaying() {
+  try {
+    const { data, error } = await supabase
+      .from('now_playing')
+      .select('title, artist, image_url')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    renderNowPlaying(data);
+  } catch (err) {
+    console.error('Erreur chargement morceau en cours :', err);
+    nowPlayingDisplay.innerHTML = '<div class="empty-state error-state">Impossible de charger le morceau en cours.</div>';
+  }
+}
+
+function renderNowPlaying(data) {
+  if (!data) {
+    nowPlayingDisplay.innerHTML = '<div class="empty-state">Le DJ n\'a pas encore renseigné le morceau en cours.</div>';
+    return;
+  }
+  nowPlayingDisplay.innerHTML = `
+    <div class="np-public-card">
+      ${data.image_url
+        ? `<img class="np-public-cover" src="${escHtml(data.image_url)}" alt="pochette" width="72" height="72" loading="lazy">`
+        : '<div class="np-public-cover placeholder" aria-hidden="true"></div>'}
+      <div class="np-public-info">
+        <strong class="np-public-title">${escHtml(data.title)}</strong>
+        <span class="muted">${escHtml(data.artist)}</span>
+      </div>
+    </div>
+  `;
+}
+
+// Realtime now_playing
+supabase
+  .channel('public:now_playing')
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'now_playing' }, () => loadNowPlaying())
+  .subscribe();
+
+// ----- Bootstrap -----
+
+searchBtn.addEventListener('click', handleSearch);
+searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleSearch(); });
+
+volUp.addEventListener('click', () => handleVolClick(1));
+volDown.addEventListener('click', () => handleVolClick(-1));
+
+loadNowPlaying();
+loadQueue();
+loadVolumeScore();
+subscribeToQueue(handleRealtimeChange);

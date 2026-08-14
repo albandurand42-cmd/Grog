@@ -1,137 +1,71 @@
 <!doctype html>
 <html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Grog — Demande un morceau</title>
+    <meta name="description" content="Suggère un morceau au DJ ce soir." />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Soirée en cours</p>
+          <h1>GROG DJ 🎶</h1>
+        </div>
+        <a href="admin.html" class="status-pill" aria-label="Page admin DJ">Admin</a>
+      </header>
 
-  <title>GROG DJ</title>
+      <!-- Prénom facultatif -->
+      <section class="card" aria-labelledby="name-title">
+        <h2 id="name-title">Ton prénom (facultatif)</h2>
+        <input id="guest-name" type="text" placeholder="Ex : Alex" autocomplete="given-name" maxlength="40" />
+      </section>
 
-  <link rel="stylesheet" href="style.css">
-</head>
+      <!-- En ce moment -->
+      <section class="card now-playing-public" aria-labelledby="np-public-title">
+        <h2 id="np-public-title">🎧 En ce moment</h2>
+        <div id="now-playing-display" class="now-playing-public-layout">
+          <div class="empty-state">Le DJ n'a pas encore renseigné le morceau en cours.</div>
+        </div>
+      </section>
 
-<body>
+      <!-- Recherche Spotify -->
+      <section class="card" aria-labelledby="search-title">
+        <h2 id="search-title">🔎 Demander un son</h2>
+        <label class="search-row">
+          <span class="sr-only">Rechercher un morceau</span>
+          <input id="search-input" type="search" placeholder="Titre, artiste…" autocomplete="off" />
+          <button id="search-btn" type="button" class="primary">Rechercher</button>
+        </label>
+        <div id="search-results" class="empty-state" role="region" aria-live="polite" aria-label="Résultats">
+          Les résultats apparaîtront ici.
+        </div>
+      </section>
 
-  <main class="app-shell">
+      <!-- File de demandes en direct -->
+      <section class="card" aria-labelledby="queue-title">
+        <h2 id="queue-title">🔥 Morceaux demandés</h2>
+        <div id="queue-list" role="region" aria-live="polite" aria-label="File d'attente">
+          <div class="empty-state">Aucune demande pour le moment.</div>
+        </div>
+      </section>
 
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">SOIRÉE</p>
-        <h1>GROG DJ</h1>
-        <p class="subtitle">
-          Demande ton son 👇
-        </p>
-      </div>
-    </header>
+      <!-- Vote volume -->
+      <section class="card" aria-labelledby="volume-title">
+        <h2 id="volume-title">🔊 Le volume ?</h2>
+        <div class="volume-counter-row">
+          <button id="vol-down" type="button" class="vol-btn vol-btn-minus" aria-label="Baisser le volume">−1</button>
+          <div class="vol-score-wrap">
+            <span id="vol-score" class="vol-score">0</span>
+            <span id="vol-hint" class="vol-hint muted"></span>
+          </div>
+          <button id="vol-up" type="button" class="vol-btn vol-btn-plus" aria-label="Monter le volume">+1</button>
+        </div>
+      </section>
+    </main>
 
-
-    <!-- NOM -->
-
-    <section class="card">
-
-      <h2>Ton prénom</h2>
-
-      <input
-        id="guest-name"
-        type="text"
-        maxlength="30"
-        placeholder="Facultatif"
-      >
-
-      <p class="muted">
-        Tu peux rester anonyme.
-      </p>
-
-    </section>
-
-
-    <!-- RECHERCHE -->
-
-    <section class="card">
-
-      <h2>🎵 Tu veux entendre quoi ?</h2>
-
-      <div class="search-row">
-
-        <input
-          id="spotify-search"
-          type="search"
-          placeholder="Titre ou artiste..."
-        >
-
-        <button
-          id="search-button"
-          type="button"
-          class="primary"
-        >
-          Rechercher
-        </button>
-
-      </div>
-
-      <div
-        id="search-status"
-        class="muted"
-      ></div>
-
-      <div id="search-results"></div>
-
-    </section>
-
-
-    <!-- DEMANDES -->
-
-    <section class="card">
-
-      <h2>🔥 Morceaux demandés</h2>
-
-      <div id="request-list">
-        <p class="muted">
-          Aucun morceau demandé pour le moment.
-        </p>
-      </div>
-
-    </section>
-
-
-    <!-- VOLUME -->
-
-    <section class="card">
-
-      <h2>🔊 Le son ?</h2>
-
-      <div class="row">
-
-        <button
-          id="quieter-button"
-          type="button"
-          class="secondary"
-        >
-          🔉 Moins fort
-        </button>
-
-        <button
-          id="louder-button"
-          type="button"
-          class="primary"
-        >
-          🔊 Plus fort
-        </button>
-
-      </div>
-
-      <p
-        id="volume-status"
-        class="muted"
-      ></p>
-
-    </section>
-
-  </main>
-
-  <script
-    type="module"
-    src="app.js"
-  ></script>
-
-</body>
+    <script type="module" src="app.js"></script>
+  </body>
 </html>

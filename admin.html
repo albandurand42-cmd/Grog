@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Grog — Admin DJ</title>
+    <meta name="description" content="Page d'administration du DJ — contrôle Spotify et gestion des demandes." />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Admin DJ</p>
+          <h1>Grog 🎛️</h1>
+          <p class="subtitle">Tableau de bord DJ — demandes invités, lecture Spotify.</p>
+        </div>
+        <div id="auth-status" class="status-pill">Hors connexion</div>
+      </header>
+
+      <!-- Connexion Spotify -->
+      <section class="card" aria-labelledby="spotify-connection-title">
+        <h2 id="spotify-connection-title">Connexion Spotify</h2>
+        <div class="row">
+          <button id="btn-login" type="button" class="primary">Se connecter à Spotify</button>
+          <button id="btn-logout" type="button" class="secondary">Se déconnecter</button>
+        </div>
+        <p class="muted">Utilisateur connecté : <span id="connected-user">Aucun</span></p>
+      </section>
+
+      <!-- Now Playing + Commandes -->
+      <section class="grid">
+        <article class="card now-playing" aria-labelledby="now-playing-title">
+          <h2 id="now-playing-title">Morceau actuellement joué</h2>
+          <div class="now-playing-layout">
+            <div id="np-cover" class="cover placeholder" aria-hidden="true"></div>
+            <div>
+              <h3 id="track-title">Aucun morceau</h3>
+              <p id="track-artist" class="muted">Artiste non disponible</p>
+              <div class="progress-bar" aria-hidden="true">
+                <div id="progress-fill" class="progress-bar-fill"></div>
+              </div>
+              <p id="track-time" class="muted">0:00 / 0:00</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="card" aria-labelledby="controls-title">
+          <h2 id="controls-title">Commandes</h2>
+          <div class="row wrap">
+            <button id="btn-play" type="button" class="primary">▶ Play</button>
+            <button id="btn-pause" type="button" class="secondary">⏸ Pause</button>
+            <button id="btn-prev" type="button" class="secondary">⏮ Précédent</button>
+            <button id="btn-next" type="button" class="secondary">⏭ Suivant</button>
+          </div>
+          <p class="muted" id="controls-note">Connectez-vous à Spotify pour activer les commandes.</p>
+        </article>
+      </section>
+
+      <!-- Demandes invités -->
+      <section class="card" aria-labelledby="requests-title">
+        <h2 id="requests-title">Demandes des invités</h2>
+        <div id="requests-list" role="region" aria-live="polite" aria-label="Demandes en attente">
+          <div class="empty-state">Aucune demande pour le moment.</div>
+        </div>
+      </section>
+
+      <!-- Votes volume -->
+      <section class="card" aria-labelledby="vol-title">
+        <h2 id="vol-title">Score volume (2 dernières minutes)</h2>
+        <p class="muted">Score actuel : <strong id="vol-score-admin">0</strong></p>
+      </section>
+
+      <!-- Auto-DJ -->
+      <section class="card" aria-labelledby="autodj-title">
+        <h2 id="autodj-title">Auto-DJ</h2>
+        <p class="muted">Le module <code>autoDJ.js</code> sera ajouté progressivement.</p>
+      </section>
+    </main>
+
+    <script type="module" src="admin.js"></script>
+  </body>
+</html>
