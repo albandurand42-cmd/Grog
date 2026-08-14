@@ -13,6 +13,10 @@ const timerEl = document.getElementById('tv-timer');
 const lyricsEl = document.getElementById('tv-lyrics');
 const statusEl = document.getElementById('tv-status');
 
+// Offset pour synchronisation des paroles (en millisecondes)
+// Les paroles changent L_OFFSET_MS avant le timing officiel
+const LYRICS_OFFSET_MS = 300;
+
 let _progressMs = 0;
 let _durationMs = 0;
 let _isPlaying = false;
@@ -66,9 +70,12 @@ function renderLyricsAt(progressMs) {
     return;
   }
 
+  // Appliquer l'offset pour avancer les paroles
+  const lyricsProgress = progressMs + LYRICS_OFFSET_MS;
+
   let idx = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].time <= progressMs) idx = i;
+    if (lines[i].time <= lyricsProgress) idx = i;
     else break;
   }
   const prev = lines[idx - 1]?.text || '';
