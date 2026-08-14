@@ -4,28 +4,23 @@
 import { supabase } from './supabase.js';
 import { getSyncedLyrics } from './lyrics.js';
 
-// ----- Sélecteurs DOM -----
-const coverEl        = document.getElementById('tv-cover');
+const coverEl = document.getElementById('tv-cover');
 const coverPlaceholder = document.getElementById('tv-cover-placeholder');
-const titleEl        = document.getElementById('tv-title');
-const artistEl       = document.getElementById('tv-artist');
-const progressFill   = document.getElementById('tv-progress-fill');
-const timerEl        = document.getElementById('tv-timer');
-const lyricsEl       = document.getElementById('tv-lyrics');
-const statusEl       = document.getElementById('tv-status');
+const titleEl = document.getElementById('tv-title');
+const artistEl = document.getElementById('tv-artist');
+const progressFill = document.getElementById('tv-progress-fill');
+const timerEl = document.getElementById('tv-timer');
+const lyricsEl = document.getElementById('tv-lyrics');
+const statusEl = document.getElementById('tv-status');
 
-// ----- État local -----
-let _progressMs   = 0;
-let _durationMs   = 0;
-let _isPlaying    = false;
-let _syncedAt     = null;
+let _progressMs = 0;
+let _durationMs = 0;
+let _isPlaying = false;
+let _baseSyncTime = Date.now();
 let _tickInterval = null;
-let _currentTitle  = null;
-let _currentArtist = null;
-let _currentDuration = null;
-let _lyrics        = null;
-
-// ----- Helpers -----
+let _currentTrackId = null;
+let _lyricsState = null;
+let _lyricsCacheTrackId = null;
 
 function fmt(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -34,71 +29,15 @@ function fmt(ms) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function localProgress() {
-  if (!_isPlaying || !_syncedAt) return _progressMs;
-  const elapsed = Date.now() - _syncedAt.getTime();
-  return Math.min(_durationMs || Infinity, _progressMs + elapsed);
+function getCurrentProgress() {
+  const delta = _isPlaying ? (Date.now() - _baseSyncTime) : 0;
+  return Math.min(_durationMs || Infinity, _progressMs + delta);
 }
 
-function setNoTrackState() {
-  if (coverEl) { coverEl.src = ''; coverEl.style.display = 'none'; }
-  if (coverPlaceholder) coverPlaceholder.style.display = 'flex';
-  if (titleEl)  titleEl.textContent  = 'Aucun morceau en cours';
-  if (artistEl) artistEl.textContent = '';
-  if (timerEl)  timerEl.textContent  = '0:00 / 0:00';
-  if (progressFill) progressFill.style.width = '0%';
-  if (lyricsEl) lyricsEl.textContent = '';
-  if (statusEl) statusEl.textContent = '';
-  stopTick();
-}
-
-// ----- Paroles -----
-
-async function loadLyrics(title, artist, duration) {
-  _lyrics = null;
-  if (lyricsEl) lyricsEl.textContent = 'Paroles indisponibles';
-  try {
-    const lines = await getSyncedLyrics(title, artist, duration);
-    if (lines && lines.length > 0) {
-      _lyrics = lines;
-      renderLyrics(0);
-    }
-  } catch {
-    // silently ignore
+function renderEmptyLyrics(message) {
+  if (lyricsEl) {
+    lyricsEl.innerHTML = `<p class="lyric-line lyric-active">${message}</p>`;
   }
-}
-
-function renderLyrics(progressMs) {
-  if (!_lyrics || !lyricsEl) return;
-  let idx = 0;
-  for (let i = 0; i < _lyrics.length; i++) {
-    if (_lyrics[i].time <= progressMs) idx = i;
-    else break;
-  }
-  lyricsEl.innerHTML = '';
-  _lyrics.forEach((line, i) => {
-    const p = document.createElement('p');
-    p.textContent = line.text;
-    p.className = 'lyric-line' + (i === idx ? ' lyric-active' : '');
-    lyricsEl.appendChild(p);
-  });
-  const active = lyricsEl.querySelector('.lyric-active');
-  if (active) active.scrollIntoView({ block: 'center', behavior: 'smooth' });
-}
-
-// ----- Timer tick -----
-
-function tick() {
-  const progress = localProgress();
-  const duration = _durationMs;
-  if (timerEl) timerEl.textContent = duration ? `${fmt(progress)} / ${fmt(duration)}` : fmt(progress);
-  if (progressFill && duration > 0) progressFill.style.width = `${Math.min(100, (progress / duration) * 100).toFixed(2)}%`;
-  if (_lyrics) renderLyrics(progress);
-}
-
-function startTick() {
-  if (_tickInterval) return;
-  _tickInterval = setInterval(tick, 250);
 }
 
 function stopTick() {
@@ -108,95 +47,149 @@ function stopTick() {
   }
 }
 
-// ----- Mise à jour UI depuis données Supabase -----
+function startTick() {
+  if (_tickInterval) return;
+  _tickInterval = setInterval(tick, 125);
+}
 
-async function applyTrack(row) {
-  if (!row) {
-    setNoTrackState();
+function tick() {
+  const progress = getCurrentProgress();
+  const duration = _durationMs;
+  if (timerEl) timerEl.textContent = `${fmt(progress)} / ${fmt(duration)}`;
+  if (progressFill && duration > 0) {
+    progressFill.style.width = `${Math.min(100, (progress / duration) * 100).toFixed(2)}%`;
+  }
+  renderLyricsAt(progress);
+}
+
+function parseLyricsState(payload) {
+  if (!payload) return null;
+  if (payload.type === 'synced' && Array.isArray(payload.lines)) return payload;
+  if (payload.type === 'plain') return payload;
+  return null;
+}
+
+function renderLyricsAt(progressMs) {
+  if (!_lyricsState) {
+    renderEmptyLyrics('Paroles indisponibles pour ce morceau');
     return;
   }
 
-  if (titleEl)  titleEl.textContent  = row.title  ?? '';
-  if (artistEl) artistEl.textContent = row.artist ?? '';
-
-  if (coverEl) {
-    if (row.image_url && /^https:\/\//.test(row.image_url)) {
-      coverEl.src = row.image_url;
-      coverEl.style.display = 'block';
-      coverEl.alt = `Pochette de ${row.title ?? ''}`;
-      if (coverPlaceholder) coverPlaceholder.style.display = 'none';
-    } else {
-      coverEl.src = '';
-      coverEl.style.display = 'none';
-      if (coverPlaceholder) coverPlaceholder.style.display = 'flex';
-    }
+  if (_lyricsState.type === 'plain') {
+    if (lyricsEl) lyricsEl.innerHTML = `<p class="lyric-line lyric-active">Paroles disponibles mais non synchronisées</p>`;
+    return;
   }
 
-  _durationMs  = row.duration_ms  ?? 0;
-  _progressMs  = row.progress_ms  ?? 0;
-  _isPlaying   = row.is_playing   ?? false;
-  _syncedAt    = row.synced_at ? new Date(row.synced_at) : new Date();
+  const lines = _lyricsState.lines || [];
+  if (!lines.length) {
+    renderEmptyLyrics('Paroles indisponibles pour ce morceau');
+    return;
+  }
 
-  tick();
-  if (_isPlaying) startTick(); else stopTick();
+  let current = 0;
+  while (current < lines.length - 1 && lines[current + 1].time <= progressMs) current += 1;
+  const previous = lines[current - 1]?.text || '';
+  const active = lines[current]?.text || '';
+  const next = lines[current + 1]?.text || '';
 
-  const trackKey = `${row.title}::${row.artist}::${row.duration_ms}`;
-  if (trackKey !== `${_currentTitle}::${_currentArtist}::${_currentDuration}`) {
-    await loadLyrics(row.title ?? '', row.artist ?? '', row.duration_ms ?? 0);
-    _currentTitle    = row.title;
-    _currentArtist   = row.artist;
-    _currentDuration = row.duration_ms;
+  if (!lyricsEl) return;
+  lyricsEl.innerHTML = `
+    <p class="lyric-line lyric-prev">${previous}</p>
+    <p class="lyric-line lyric-active">${active}</p>
+    <p class="lyric-line lyric-next">${next}</p>
+  `;
+}
+
+async function loadLyricsForTrack(row) {
+  if (!row?.spotify_track_id) {
+    _lyricsState = null;
+    renderEmptyLyrics('Paroles indisponibles pour ce morceau');
+    return;
+  }
+  if (_lyricsCacheTrackId === row.spotify_track_id && _lyricsState) return;
+  _lyricsCacheTrackId = row.spotify_track_id;
+  _lyricsState = null;
+  renderEmptyLyrics('Chargement des paroles…');
+  try {
+    const result = await getSyncedLyrics({
+      spotify_track_id: row.spotify_track_id,
+      track_name: row.title ?? '',
+      artist_name: row.artist ?? '',
+      album_name: row.album ?? '',
+      duration_ms: row.duration_ms ?? 0,
+    });
+    _lyricsState = parseLyricsState(result);
+    if (!_lyricsState) {
+      renderEmptyLyrics('Paroles indisponibles pour ce morceau');
+    } else if (_lyricsState.type === 'plain') {
+      renderEmptyLyrics('Paroles disponibles mais non synchronisées');
+    }
+  } catch (error) {
+    console.error('[Lyrics] erreur LRCLIB:', error);
+    _lyricsState = null;
+    renderEmptyLyrics('Paroles indisponibles pour ce morceau');
   }
 }
 
-// ----- Chargement initial -----
+async function applyTrack(row) {
+  if (!row) {
+    if (coverEl) { coverEl.src = ''; coverEl.style.display = 'none'; }
+    if (coverPlaceholder) coverPlaceholder.style.display = 'flex';
+    if (titleEl) titleEl.textContent = 'Aucun morceau en cours';
+    if (artistEl) artistEl.textContent = '';
+    if (timerEl) timerEl.textContent = '0:00 / 0:00';
+    if (progressFill) progressFill.style.width = '0%';
+    renderEmptyLyrics('Paroles indisponibles pour ce morceau');
+    stopTick();
+    return;
+  }
+
+  if (titleEl) titleEl.textContent = row.title ?? '';
+  if (artistEl) artistEl.textContent = row.artist ?? '';
+  if (coverEl && row.image_url && /^https:\/\//.test(row.image_url)) {
+    coverEl.src = row.image_url;
+    coverEl.style.display = 'block';
+    if (coverPlaceholder) coverPlaceholder.style.display = 'none';
+  }
+
+  _durationMs = row.duration_ms ?? 0;
+  _progressMs = row.progress_ms ?? 0;
+  _isPlaying = row.is_playing ?? false;
+  _baseSyncTime = Date.now();
+
+  console.log('[now_playing] TV data:', row.title, row.duration_ms, row.progress_ms);
+  await loadLyricsForTrack(row);
+  tick();
+  if (_isPlaying) startTick(); else stopTick();
+}
 
 async function loadCurrent() {
   if (statusEl) statusEl.textContent = 'Chargement…';
   try {
     const { data, error } = await supabase
-      .schema('public')
       .from('now_playing')
-      .select('id, spotify_track_id, title, artist, image_url, started_at, duration_ms, progress_ms, is_playing, synced_at')
+      .select('spotify_track_id, title, artist, album, image_url, duration_ms, progress_ms, is_playing, synced_at')
       .order('id', { ascending: false })
       .limit(1)
       .maybeSingle();
-
-    console.log('[TV] Supabase connecté');
-    console.log('[TV] now_playing reçu:', data);
-    if (error) {
-      console.error('[TV] erreur Supabase:', error);
-      throw error;
-    }
-
+    if (error) throw error;
     if (statusEl) statusEl.textContent = '';
-    if (!data) {
-      setNoTrackState();
-      return;
-    }
-
     await applyTrack(data);
   } catch (err) {
     console.error('[TV] erreur Supabase:', err);
     if (statusEl) statusEl.textContent = 'Aucun morceau en cours';
-    setNoTrackState();
   }
 }
-
-// ----- Realtime -----
 
 function subscribeRealtime() {
   supabase
     .channel('tv:now_playing')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'now_playing' }, async (payload) => {
-      console.log('[TV] Realtime event :', payload);
       const row = payload.new ?? null;
       await applyTrack(row && Object.keys(row).length ? row : null);
     })
     .subscribe((status) => console.log('[TV] Realtime status :', status));
 }
-
-// ----- Init -----
 
 loadCurrent();
 subscribeRealtime();
