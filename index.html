@@ -3,79 +3,54 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Appli DJ</title>
-    <meta name="description" content="Appli DJ - base simple pour une future application de DJ avec Spotify." />
+    <title>Grog — Demande un morceau</title>
+    <meta name="description" content="Suggère un morceau au DJ ce soir." />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <main class="app-shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Prototype V1</p>
-          <h1>Appli DJ</h1>
-          <p class="subtitle">Base simple pour Spotify, la file interne et le futur Auto-DJ.</p>
+          <p class="eyebrow">Soirée en cours</p>
+          <h1>Grog 🎶</h1>
+          <p class="subtitle">Recherche un morceau et demande-le au DJ.</p>
         </div>
-        <div class="status-pill">Hors connexion</div>
+        <a href="admin.html" class="status-pill" aria-label="Page admin DJ">Admin</a>
       </header>
 
-      <section class="card" aria-labelledby="spotify-connection-title">
-        <h2 id="spotify-connection-title">Connexion Spotify</h2>
-        <div class="row">
-          <button type="button" class="primary">Se connecter à Spotify</button>
-          <button type="button" class="secondary">Se déconnecter</button>
+      <!-- Recherche Spotify -->
+      <section class="card" aria-labelledby="search-title">
+        <h2 id="search-title">Rechercher un morceau</h2>
+        <label class="search-row">
+          <span class="sr-only">Rechercher un morceau</span>
+          <input id="search-input" type="search" placeholder="Titre, artiste…" autocomplete="off" />
+          <button id="search-btn" type="button" class="primary">Rechercher</button>
+        </label>
+        <div id="search-results" class="empty-state" role="region" aria-live="polite" aria-label="Résultats">
+          Les résultats apparaîtront ici.
         </div>
-        <p class="muted">Utilisateur connecté : <span id="connected-user">Aucun</span></p>
       </section>
 
-      <section class="grid">
-        <article class="card now-playing" aria-labelledby="now-playing-title">
-          <h2 id="now-playing-title">Morceau actuellement joué</h2>
-          <div class="now-playing-layout">
-            <div class="cover placeholder" aria-hidden="true"></div>
-            <div>
-              <h3 id="track-title">Aucun morceau</h3>
-              <p id="track-artist" class="muted">Artiste non disponible</p>
-              <div class="progress-bar" aria-hidden="true">
-                <div class="progress-bar-fill"></div>
-              </div>
-              <p class="muted">0:00 / 0:00</p>
-            </div>
-          </div>
-        </article>
-
-        <article class="card" aria-labelledby="controls-title">
-          <h2 id="controls-title">Commandes</h2>
-          <div class="row wrap">
-            <button type="button" class="primary">Play</button>
-            <button type="button" class="secondary">Pause</button>
-            <button type="button" class="secondary">Précédent</button>
-            <button type="button" class="secondary">Suivant</button>
-          </div>
-          <p class="muted">Les commandes Spotify seront reliées à une étape ultérieure.</p>
-        </article>
+      <!-- File de demandes en direct -->
+      <section class="card" aria-labelledby="queue-title">
+        <h2 id="queue-title">Demandes en attente</h2>
+        <div id="queue-list" role="region" aria-live="polite" aria-label="File d'attente">
+          <div class="empty-state">Aucune demande pour le moment.</div>
+        </div>
       </section>
 
-      <section class="grid">
-        <article class="card" aria-labelledby="search-title">
-          <h2 id="search-title">Recherche Spotify</h2>
-          <label class="search-row">
-            <span class="sr-only">Rechercher un morceau</span>
-            <input type="search" placeholder="Rechercher un morceau, un artiste..." />
-            <button type="button" class="primary">Rechercher</button>
-          </label>
-          <div class="empty-state">Les résultats de recherche apparaîtront ici.</div>
-        </article>
-
-        <article class="card" aria-labelledby="queue-title">
-          <h2 id="queue-title">File d'attente interne</h2>
-          <div class="empty-state">Aucun morceau dans la file pour le moment.</div>
-          <p class="muted">Cette file sera gérée par l'application, pas par la queue native de Spotify.</p>
-        </article>
-      </section>
-
-      <section class="card" aria-labelledby="autodj-title">
-        <h2 id="autodj-title">Préparation Auto-DJ</h2>
-        <p class="muted">Le futur module <code>autoDJ.js</code> sera ajouté ici progressivement.</p>
+      <!-- Vote volume -->
+      <section class="card" aria-labelledby="volume-title">
+        <h2 id="volume-title">Volume</h2>
+        <p class="muted">Un seul vote par session.</p>
+        <div class="vote-row">
+          <button id="vol-down" type="button" class="secondary vote-btn" aria-label="Baisser le volume">
+            👇 Trop fort
+          </button>
+          <button id="vol-up" type="button" class="secondary vote-btn" aria-label="Monter le volume">
+            👆 Trop bas
+          </button>
+        </div>
       </section>
     </main>
 
