@@ -14,18 +14,19 @@ const lyricsEl = document.getElementById('tv-lyrics');
 const statusEl = document.getElementById('tv-status');
 
 // Offset pour synchronisation des paroles (en millisecondes)
-// Les paroles changent L_OFFSET_MS avant le timing officiel
+// Les paroles changent LYRICS_OFFSET_MS avant le timing officiel
 const LYRICS_OFFSET_MS = 300;
 
 let _progressMs = 0;
 let _durationMs = 0;
 let _isPlaying = false;
-let _syncedAt = Date.now(); // Timestamp du serveur en millisecondes
-let _baseSyncTime = Date.now(); // Référence locale au moment de la sync
+let _syncedAt = Date.now();
+let _baseSyncTime = Date.now();
 let _tickInterval = null;
 let _lyricsState = null;
 let _currentTrackId = null;
 let _lyricsCacheTrackId = null;
+let _lyricsRequestId = null; // Identifiant unique de la requête de paroles en cours
 
 function fmt(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -35,8 +36,6 @@ function fmt(ms) {
 }
 
 function currentProgress() {
-  // Si lecture : progression = progress_ms + (maintenant - moment de sync)
-  // Sinon : progression statique = progress_ms
   const elapsed = _isPlaying ? (Date.now() - _baseSyncTime) : 0;
   return Math.min(_durationMs || Infinity, _progressMs + elapsed);
 }
@@ -106,10 +105,15 @@ async function loadLyricsForTrack(row) {
     renderLyricsAt(0);
     return;
   }
-  if (_lyricsCacheTrackId === row.spotify_track_id && _lyricsState) return;
-  _lyricsCacheTrackId = row.spotify_track_id;
-  _lyricsState = null;
+
+  // Générer un ID unique pour cette requête
+  const requestId = Math.random();
+  _lyricsRequestId = requestId;
+
+  // Ne pas attendre les paroles : mettre à jour l'UI immédiatement
   if (lyricsEl) lyricsEl.innerHTML = '<p class="lyric-line">Chargement des paroles…</p>';
+
+  // Charger les paroles en arrière-plan sans bloquer
   try {
     const result = await getSyncedLyrics({
       spotify_track_id: row.spotify_track_id,
@@ -118,14 +122,26 @@ async function loadLyricsForTrack(row) {
       album_name: row.album ?? '',
       duration_ms: row.duration_ms ?? 0,
     });
+
+    // Ignorer si une nouvelle requête a été lancée entre-temps
+    if (requestId !== _lyricsRequestId) {
+      console.log('[TV] Résultat de paroles ignoré (morceau changé)');
+      return;
+    }
+
     _lyricsState = result;
     if (!_lyricsState) {
       if (lyricsEl) lyricsEl.innerHTML = '<p class="lyric-line lyric-active">Paroles indisponibles pour ce morceau</p>';
     } else if (_lyricsState.type === 'plain') {
       if (lyricsEl) lyricsEl.innerHTML = '<p class="lyric-line lyric-active">Paroles disponibles mais non synchronisées</p>';
+    } else {
+      // Paroles synchronisées chargées, mettre à jour immédiatement
+      tick();
     }
   } catch (error) {
-    console.error('[Lyrics] erreur LRCLIB:', error);
+    console.error('[TV] erreur LRCLIB:', error);
+    // Ignorer si une nouvelle requête a été lancée
+    if (requestId !== _lyricsRequestId) return;
     _lyricsState = null;
     if (lyricsEl) lyricsEl.innerHTML = '<p class="lyric-line lyric-active">Paroles indisponibles pour ce morceau</p>';
   }
@@ -144,6 +160,7 @@ async function applyTrack(row) {
     return;
   }
 
+  // Mettre à jour immédiatement : titre, artiste, pochette
   if (titleEl) titleEl.textContent = row.title ?? '';
   if (artistEl) artistEl.textContent = row.artist ?? '';
   if (coverEl) {
@@ -158,25 +175,32 @@ async function applyTrack(row) {
     }
   }
 
+  // Mettre à jour le timer immédiatement
   _durationMs = row.duration_ms ?? 0;
   _progressMs = row.progress_ms ?? 0;
   _isPlaying = row.is_playing ?? false;
-  // Utiliser synced_at du serveur comme référence temporelle
   _syncedAt = row.synced_at ? new Date(row.synced_at).getTime() : Date.now();
   _baseSyncTime = Date.now();
 
-  console.log('[TV] données:', row.title, row.duration_ms, row.progress_ms, row.is_playing);
+  console.log('[TV] morceau appliqué immédiatement:', row.title, row.duration_ms, row.progress_ms);
 
-  // Ne charger les paroles que si duration_ms est un nombre > 0
+  // Mettre à jour l'affichage du timer IMMÉDIATEMENT
+  tick();
+
+  // Gérer l'état du lecteur
+  if (_isPlaying && _durationMs > 0) startTick();
+  else stopTick();
+
+  // Changer d'ID de morceau courant
+  _currentTrackId = row.spotify_track_id;
+
+  // Charger les paroles EN ARRIÈRE-PLAN sans bloquer
   if (typeof row.duration_ms === 'number' && row.duration_ms > 0) {
-    await loadLyricsForTrack(row);
+    loadLyricsForTrack(row);
   } else {
     _lyricsState = null;
     if (lyricsEl) lyricsEl.innerHTML = '<p class="lyric-line lyric-active">Durée indisponible - paroles désactivées</p>';
   }
-
-  tick();
-  if (_isPlaying && _durationMs > 0) startTick(); else stopTick();
 }
 
 async function loadCurrent() {
@@ -201,10 +225,17 @@ function subscribeRealtime() {
   supabase
     .channel('tv:now_playing')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'now_playing' }, async (payload) => {
-      const row = payload.new ?? null;
-      await applyTrack(row && Object.keys(row).length ? row : null);
+      // Utiliser directement payload.new si disponible
+      if (payload.new && Object.keys(payload.new).length) {
+        console.log('[TV] Realtime update reçu, application immédiate');
+        applyTrack(payload.new);
+      } else {
+        // Fallback si payload vide ou suppression
+        console.log('[TV] Fallback loadCurrent après event Realtime');
+        await loadCurrent();
+      }
     })
-    .subscribe((status) => console.log('[TV] Realtime status :', status));
+    .subscribe((status) => console.log('[TV] Realtime status:', status));
 }
 
 loadCurrent();
