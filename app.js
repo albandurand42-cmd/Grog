@@ -4,7 +4,7 @@ console.log('GROG app.js chargé');
 
 import { searchTracks } from './spotify.js';
 import { submitRequest, fetchPendingRequests, subscribeToQueue, getSessionId } from './queue.js';
-import { castVote, hasVoted, getVote } from './votes.js';
+import { canVote, recordVote, VOLUME_WINDOW_SECONDS } from './votes.js';
 import { supabase } from './supabase.js';
 import { escHtml } from './utils.js';
 
@@ -16,6 +16,9 @@ const searchResults = document.getElementById('search-results');
 const queueList = document.getElementById('queue-list');
 const volUp = document.getElementById('vol-up');
 const volDown = document.getElementById('vol-down');
+const volScore = document.getElementById('vol-score');
+const volHint = document.getElementById('vol-hint');
+const nowPlayingDisplay = document.getElementById('now-playing-display');
 
 // ----- Recherche Spotify -----
 
@@ -74,7 +77,7 @@ async function onRequestClick(track, articleEl) {
     btn.textContent = 'Demander';
     searchResults.insertAdjacentHTML(
       'afterend',
-      `<p class="muted error-state">Impossible de soumettre la demande. Réessaie.</p>`
+      `<p class="muted error-state">Impossible d'ajouter cette musique. Réessaie.</p>`
     );
   }
 }
@@ -123,38 +126,115 @@ function handleRealtimeChange() {
   loadQueue();
 }
 
-// ----- Votes volume -----
+// ----- Votes volume (fenêtre glissante 2 min) -----
 
-function updateVolumeUI() {
-  if (hasVoted()) {
-    const dir = getVote();
-    volUp.disabled = true;
-    volDown.disabled = true;
-    volUp.classList.toggle('voted', dir === 'up');
-    volDown.classList.toggle('voted', dir === 'down');
+async function loadVolumeScore() {
+  try {
+    const since = new Date(Date.now() - VOLUME_WINDOW_SECONDS * 1000).toISOString();
+    const { data, error } = await supabase
+      .from('volume_votes')
+      .select('value')
+      .gte('created_at', since);
+    if (error) throw error;
+    const score = (data ?? []).reduce((sum, r) => sum + (r.value ?? 0), 0);
+    renderVolumeScore(score);
+  } catch (err) {
+    console.error('Erreur chargement score volume :', err);
   }
 }
 
-async function handleVolClick(direction) {
-  const voted = castVote(direction);
-  if (!voted) return;
-  updateVolumeUI();
-  // Persister le vote dans Supabase pour que l'admin puisse voir les totaux
+function renderVolumeScore(score) {
+  const sign = score > 0 ? '+' : '';
+  volScore.textContent = sign + score;
+  if (score > 0) {
+    volHint.textContent = 'Le public demande un peu plus fort';
+  } else if (score < 0) {
+    volHint.textContent = 'Le public demande un peu moins fort';
+  } else {
+    volHint.textContent = 'Le volume semble bon';
+  }
+}
+
+async function handleVolClick(value) {
+  if (!canVote()) return;
+  recordVote();
+  // Feedback visuel immédiat
+  const btn = value > 0 ? volUp : volDown;
+  btn.disabled = true;
+  setTimeout(() => { btn.disabled = false; }, 2000);
   try {
-    await supabase.from('volume_votes').insert({ direction, session_id: getSessionId() });
+    const { error } = await supabase
+      .from('volume_votes')
+      .insert({ value, session_id: getSessionId() });
+    if (error) throw error;
+    await loadVolumeScore();
   } catch (err) {
     console.error('Erreur vote volume :', err);
+    btn.disabled = false;
+    alert('Impossible d\'envoyer ton vote.');
   }
 }
+
+// Refresh périodique du score (fenêtre glissante)
+setInterval(loadVolumeScore, 8000);
+
+// Realtime sur volume_votes
+supabase
+  .channel('public:volume_votes')
+  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'volume_votes' }, () => loadVolumeScore())
+  .subscribe();
+
+// ----- Now Playing -----
+
+async function loadNowPlaying() {
+  try {
+    const { data, error } = await supabase
+      .from('now_playing')
+      .select('title, artist, image_url')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    renderNowPlaying(data);
+  } catch (err) {
+    console.error('Erreur chargement morceau en cours :', err);
+    nowPlayingDisplay.innerHTML = '<div class="empty-state error-state">Impossible de charger le morceau en cours.</div>';
+  }
+}
+
+function renderNowPlaying(data) {
+  if (!data) {
+    nowPlayingDisplay.innerHTML = '<div class="empty-state">Le DJ n\'a pas encore renseigné le morceau en cours.</div>';
+    return;
+  }
+  nowPlayingDisplay.innerHTML = `
+    <div class="np-public-card">
+      ${data.image_url
+        ? `<img class="np-public-cover" src="${escHtml(data.image_url)}" alt="pochette" width="72" height="72" loading="lazy">`
+        : '<div class="np-public-cover placeholder" aria-hidden="true"></div>'}
+      <div class="np-public-info">
+        <strong class="np-public-title">${escHtml(data.title)}</strong>
+        <span class="muted">${escHtml(data.artist)}</span>
+      </div>
+    </div>
+  `;
+}
+
+// Realtime now_playing
+supabase
+  .channel('public:now_playing')
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'now_playing' }, () => loadNowPlaying())
+  .subscribe();
 
 // ----- Bootstrap -----
 
 searchBtn.addEventListener('click', handleSearch);
 searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleSearch(); });
 
-volUp.addEventListener('click', () => handleVolClick('up'));
-volDown.addEventListener('click', () => handleVolClick('down'));
+volUp.addEventListener('click', () => handleVolClick(1));
+volDown.addEventListener('click', () => handleVolClick(-1));
 
-updateVolumeUI();
+loadNowPlaying();
 loadQueue();
+loadVolumeScore();
 subscribeToQueue(handleRealtimeChange);

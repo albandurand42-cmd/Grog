@@ -1,10 +1,11 @@
 // Contrôleur de la page admin DJ (admin.html).
-// Gère l'authentification Spotify PKCE, la lecture, les demandes invités et les votes volume.
+// Gère l'authentification Spotify PKCE, la lecture, les demandes invités, les votes volume et now_playing.
 
 import { startPKCE, handleCallback, getStoredTokens, logout } from './auth.js';
 import { fetchPendingRequests, subscribeToQueue } from './queue.js';
 import { supabase } from './supabase.js';
 import { escHtml } from './utils.js';
+import { VOLUME_WINDOW_SECONDS } from './votes.js';
 
 // ----- Sélecteurs DOM -----
 const authStatus = document.getElementById('auth-status');
@@ -17,16 +18,13 @@ const btnPrev = document.getElementById('btn-prev');
 const btnNext = document.getElementById('btn-next');
 const controlsNote = document.getElementById('controls-note');
 const requestsList = document.getElementById('requests-list');
-const volDownCount = document.getElementById('vol-down-count');
-const volUpCount = document.getElementById('vol-up-count');
-const btnResetVotes = document.getElementById('btn-reset-votes');
+const volScoreAdmin = document.getElementById('vol-score-admin');
 
 let accessToken = null;
 
 // ----- Auth -----
 
 async function init() {
-  // Gérer le retour du callback Spotify PKCE
   const tokens = await handleCallback().catch(() => null);
   const stored = tokens ?? getStoredTokens();
   if (stored) {
@@ -39,7 +37,8 @@ async function init() {
 
   loadRequests();
   subscribeToQueue(handleRealtimeChange);
-  loadVoteCounts();
+  loadVolumeScore();
+  setInterval(loadVolumeScore, 8000);
 }
 
 function setAuthUI(connected) {
@@ -94,8 +93,13 @@ btnNext.addEventListener('click', () => spotifyControl('next'));
 // ----- Demandes invités -----
 
 async function loadRequests() {
-  const rows = await fetchPendingRequests();
-  renderRequests(rows);
+  try {
+    const rows = await fetchPendingRequests();
+    renderRequests(rows);
+  } catch (err) {
+    console.error('Erreur chargement demandes :', err);
+    requestsList.innerHTML = '<div class="empty-state error-state">Impossible de charger les demandes.</div>';
+  }
 }
 
 function renderRequests(rows) {
@@ -113,16 +117,22 @@ function buildRequestItem(row) {
   const article = document.createElement('article');
   article.className = 'request-card';
   article.dataset.id = row.id;
+  const nameHtml = row.guest_name
+    ? `<span class="muted guest-name">Demandé par ${escHtml(row.guest_name)}</span>`
+    : `<span class="muted guest-name">Anonyme</span>`;
   article.innerHTML = `
     ${row.album_art ? `<img class="cover" src="${escHtml(row.album_art)}" alt="pochette" width="56" height="56" loading="lazy">` : '<div class="cover placeholder" aria-hidden="true"></div>'}
     <div class="request-info">
       <strong>${escHtml(row.title)}</strong>
       <span class="muted">${escHtml(row.artist)}</span>
+      ${nameHtml}
     </div>
     <span class="vote-count">${row.request_count ?? 1}×</span>
-    <button type="button" class="badge-accept" data-action="accept">✓</button>
-    <button type="button" class="badge-reject" data-action="reject">✕</button>
+    <button type="button" class="badge-play" data-action="play" title="Mettre en lecture">▶</button>
+    <button type="button" class="badge-accept" data-action="accept" title="Marquer comme joué">✓</button>
+    <button type="button" class="badge-reject" data-action="reject" title="Refuser">✕</button>
   `;
+  article.querySelector('[data-action="play"]').addEventListener('click', () => setNowPlaying(row, article));
   article.querySelector('[data-action="accept"]').addEventListener('click', () => updateStatus(row.id, 'played', article));
   article.querySelector('[data-action="reject"]').addEventListener('click', () => updateStatus(row.id, 'rejected', article));
   return article;
@@ -140,36 +150,50 @@ async function updateStatus(id, status, articleEl) {
   }
 }
 
+// ----- Now Playing -----
+
+async function setNowPlaying(row, articleEl) {
+  const btn = articleEl.querySelector('[data-action="play"]');
+  btn.disabled = true;
+  try {
+    // Supprimer l'entrée précédente et insérer la nouvelle
+    await supabase.from('now_playing').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const { error } = await supabase.from('now_playing').insert({
+      spotify_track_id: row.spotify_id ?? null,
+      title: row.title,
+      artist: row.artist,
+      image_url: row.album_art ?? null,
+    });
+    if (error) throw error;
+    // Feedback visuel
+    btn.textContent = '▶️';
+    setTimeout(() => { btn.textContent = '▶'; btn.disabled = false; }, 2000);
+  } catch (err) {
+    console.error('Erreur now_playing :', err);
+    btn.disabled = false;
+    alert('Impossible de mettre à jour le morceau en cours.');
+  }
+}
+
 function handleRealtimeChange() {
   loadRequests();
 }
 
-// ----- Votes volume -----
+// ----- Score volume (lecture seule, fenêtre 2 min) -----
 
-async function loadVoteCounts() {
-  const { data } = await supabase
-    .from('volume_votes')
-    .select('direction, count:id.count()')
-    .order('direction');
-
-  if (!data) return;
-  for (const row of data) {
-    if (row.direction === 'down') volDownCount.textContent = '👇 ' + row.count;
-    if (row.direction === 'up') volUpCount.textContent = '👆 ' + row.count;
+async function loadVolumeScore() {
+  try {
+    const since = new Date(Date.now() - VOLUME_WINDOW_SECONDS * 1000).toISOString();
+    const { data, error } = await supabase
+      .from('volume_votes')
+      .select('value')
+      .gte('created_at', since);
+    if (error) throw error;
+    const score = (data ?? []).reduce((sum, r) => sum + (r.value ?? 0), 0);
+    if (volScoreAdmin) volScoreAdmin.textContent = (score > 0 ? '+' : '') + score;
+  } catch (err) {
+    console.error('Erreur score volume admin :', err);
   }
 }
-
-btnResetVotes.addEventListener('click', async () => {
-  if (!confirm('Réinitialiser tous les votes volume ?')) return;
-  // Supprimer toutes les lignes de la table volume_votes via une RPC dédiée.
-  // La condition `neq('id', NIL_UUID)` est un filtre universel car Supabase
-  // n'expose pas DELETE sans filtre via l'API REST cliente.
-  await supabase.from('volume_votes').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  await supabase
-    .channel('admin-reset')
-    .send({ type: 'broadcast', event: 'reset_votes', payload: {} });
-  volDownCount.textContent = '👇 0';
-  volUpCount.textContent = '👆 0';
-});
 
 init();

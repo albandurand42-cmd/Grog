@@ -1,39 +1,26 @@
-// Votes anonymes sur le volume.
-// Anti-spam par localStorage : un seul vote par session de navigateur.
+// Votes anonymes sur le volume — compteur cumulatif +1 / -1.
+// Anti-spam : un seul vote autorisé par tranche de 2 secondes depuis le même navigateur.
 
-const STORAGE_KEY = 'grog_volume_vote';
+const LAST_VOTE_KEY = 'grog_volume_last_vote_ts';
+const COOLDOWN_MS = 2000; // 2 secondes entre deux votes
 
 /**
- * Retourne true si l'utilisateur a déjà voté dans cette session.
+ * Retourne true si l'utilisateur peut voter (cooldown respecté).
  * @returns {boolean}
  */
-export function hasVoted() {
-  return !!localStorage.getItem(STORAGE_KEY);
+export function canVote() {
+  const last = parseInt(localStorage.getItem(LAST_VOTE_KEY) || '0', 10);
+  return Date.now() - last >= COOLDOWN_MS;
 }
 
 /**
- * Retourne la direction du vote en cours ('up' | 'down'), ou null.
- * @returns {'up'|'down'|null}
+ * Enregistre localement le timestamp du dernier vote pour le cooldown.
  */
-export function getVote() {
-  return localStorage.getItem(STORAGE_KEY);
+export function recordVote() {
+  localStorage.setItem(LAST_VOTE_KEY, String(Date.now()));
 }
 
 /**
- * Enregistre un vote de volume.
- * @param {'up'|'down'} direction
- * @returns {boolean} true si le vote a été enregistré, false si déjà voté
+ * Durée de la fenêtre glissante en secondes (2 minutes).
  */
-export function castVote(direction) {
-  if (hasVoted()) return false;
-  localStorage.setItem(STORAGE_KEY, direction);
-  return true;
-}
-
-/**
- * Réinitialise le vote (utile pour un nouvel événement).
- * Typiquement appelé par l'admin via un message Supabase Realtime.
- */
-export function resetVote() {
-  localStorage.removeItem(STORAGE_KEY);
-}
+export const VOLUME_WINDOW_SECONDS = 120;
