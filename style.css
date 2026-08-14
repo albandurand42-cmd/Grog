@@ -149,6 +149,21 @@ h2 { font-size: 1.1rem; margin-bottom: 0.75rem; }
   flex: 0 0 auto;
 }
 
+.cover.np-cover {
+  width: 120px;
+  height: 120px;
+  border-radius: 1rem;
+  background-size: cover;
+  background-position: center;
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.sync-status {
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+}
+
 .progress-bar {
   height: 0.5rem;
   border-radius: 999px;

@@ -111,3 +111,40 @@ export function getStoredTokens() {
 export function logout() {
   sessionStorage.removeItem('spotify_token');
 }
+
+/**
+ * Tente de rafraîchir le token Spotify si un refresh_token est disponible.
+ * Met à jour sessionStorage et retourne le nouvel access_token, ou null si impossible.
+ * @returns {Promise<string|null>}
+ */
+export async function refreshAccessToken() {
+  const stored = getStoredTokens();
+  if (!stored?.refresh_token) return null;
+
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: stored.refresh_token,
+    client_id: SPOTIFY_CLIENT_ID,
+  });
+
+  try {
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    if (!res.ok) return null;
+
+    const tokens = await res.json();
+    // Spotify may or may not return a new refresh_token — keep the old one if absent
+    const updated = {
+      ...stored,
+      ...tokens,
+      refresh_token: tokens.refresh_token ?? stored.refresh_token,
+    };
+    sessionStorage.setItem('spotify_token', JSON.stringify(updated));
+    return updated.access_token;
+  } catch {
+    return null;
+  }
+}
