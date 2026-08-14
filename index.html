@@ -1,84 +1,137 @@
 <!doctype html>
 <html lang="fr">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Appli DJ</title>
-    <meta name="description" content="Appli DJ - base simple pour une future application de DJ avec Spotify." />
-    <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
-    <main class="app-shell">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">Prototype V1</p>
-          <h1>Appli DJ</h1>
-          <p class="subtitle">Base simple pour Spotify, la file interne et le futur Auto-DJ.</p>
-        </div>
-        <div class="status-pill">Hors connexion</div>
-      </header>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-      <section class="card" aria-labelledby="spotify-connection-title">
-        <h2 id="spotify-connection-title">Connexion Spotify</h2>
-        <div class="row">
-          <button type="button" class="primary">Se connecter à Spotify</button>
-          <button type="button" class="secondary">Se déconnecter</button>
-        </div>
-        <p class="muted">Utilisateur connecté : <span id="connected-user">Aucun</span></p>
-      </section>
+  <title>GROG DJ</title>
 
-      <section class="grid">
-        <article class="card now-playing" aria-labelledby="now-playing-title">
-          <h2 id="now-playing-title">Morceau actuellement joué</h2>
-          <div class="now-playing-layout">
-            <div class="cover placeholder" aria-hidden="true"></div>
-            <div>
-              <h3 id="track-title">Aucun morceau</h3>
-              <p id="track-artist" class="muted">Artiste non disponible</p>
-              <div class="progress-bar" aria-hidden="true">
-                <div class="progress-bar-fill"></div>
-              </div>
-              <p class="muted">0:00 / 0:00</p>
-            </div>
-          </div>
-        </article>
+  <link rel="stylesheet" href="style.css">
+</head>
 
-        <article class="card" aria-labelledby="controls-title">
-          <h2 id="controls-title">Commandes</h2>
-          <div class="row wrap">
-            <button type="button" class="primary">Play</button>
-            <button type="button" class="secondary">Pause</button>
-            <button type="button" class="secondary">Précédent</button>
-            <button type="button" class="secondary">Suivant</button>
-          </div>
-          <p class="muted">Les commandes Spotify seront reliées à une étape ultérieure.</p>
-        </article>
-      </section>
+<body>
 
-      <section class="grid">
-        <article class="card" aria-labelledby="search-title">
-          <h2 id="search-title">Recherche Spotify</h2>
-          <label class="search-row">
-            <span class="sr-only">Rechercher un morceau</span>
-            <input type="search" placeholder="Rechercher un morceau, un artiste..." />
-            <button type="button" class="primary">Rechercher</button>
-          </label>
-          <div class="empty-state">Les résultats de recherche apparaîtront ici.</div>
-        </article>
+  <main class="app-shell">
 
-        <article class="card" aria-labelledby="queue-title">
-          <h2 id="queue-title">File d'attente interne</h2>
-          <div class="empty-state">Aucun morceau dans la file pour le moment.</div>
-          <p class="muted">Cette file sera gérée par l'application, pas par la queue native de Spotify.</p>
-        </article>
-      </section>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">SOIRÉE</p>
+        <h1>GROG DJ</h1>
+        <p class="subtitle">
+          Demande ton son 👇
+        </p>
+      </div>
+    </header>
 
-      <section class="card" aria-labelledby="autodj-title">
-        <h2 id="autodj-title">Préparation Auto-DJ</h2>
-        <p class="muted">Le futur module <code>autoDJ.js</code> sera ajouté ici progressivement.</p>
-      </section>
-    </main>
 
-    <script type="module" src="app.js"></script>
-  </body>
+    <!-- NOM -->
+
+    <section class="card">
+
+      <h2>Ton prénom</h2>
+
+      <input
+        id="guest-name"
+        type="text"
+        maxlength="30"
+        placeholder="Facultatif"
+      >
+
+      <p class="muted">
+        Tu peux rester anonyme.
+      </p>
+
+    </section>
+
+
+    <!-- RECHERCHE -->
+
+    <section class="card">
+
+      <h2>🎵 Tu veux entendre quoi ?</h2>
+
+      <div class="search-row">
+
+        <input
+          id="spotify-search"
+          type="search"
+          placeholder="Titre ou artiste..."
+        >
+
+        <button
+          id="search-button"
+          type="button"
+          class="primary"
+        >
+          Rechercher
+        </button>
+
+      </div>
+
+      <div
+        id="search-status"
+        class="muted"
+      ></div>
+
+      <div id="search-results"></div>
+
+    </section>
+
+
+    <!-- DEMANDES -->
+
+    <section class="card">
+
+      <h2>🔥 Morceaux demandés</h2>
+
+      <div id="request-list">
+        <p class="muted">
+          Aucun morceau demandé pour le moment.
+        </p>
+      </div>
+
+    </section>
+
+
+    <!-- VOLUME -->
+
+    <section class="card">
+
+      <h2>🔊 Le son ?</h2>
+
+      <div class="row">
+
+        <button
+          id="quieter-button"
+          type="button"
+          class="secondary"
+        >
+          🔉 Moins fort
+        </button>
+
+        <button
+          id="louder-button"
+          type="button"
+          class="primary"
+        >
+          🔊 Plus fort
+        </button>
+
+      </div>
+
+      <p
+        id="volume-status"
+        class="muted"
+      ></p>
+
+    </section>
+
+  </main>
+
+  <script
+    type="module"
+    src="app.js"
+  ></script>
+
+</body>
 </html>
