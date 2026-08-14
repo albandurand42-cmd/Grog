@@ -22,18 +22,11 @@ const volScoreAdmin = document.getElementById('vol-score-admin');
 const syncStatus = document.getElementById('sync-status');
 
 let accessToken = null;
-/** Spotify track ID du dernier morceau écrit dans now_playing */
 let _lastSyncedTrackId = null;
-/** Dernière valeur de is_playing écrite dans Supabase */
 let _lastSyncedIsPlaying = null;
-/** Timestamp (Date.now()) de la dernière écriture périodique dans Supabase */
 let _lastPeriodicWrite = 0;
-/** Intervalle de polling Spotify */
 let _syncInterval = null;
-/** Intervalle en ms entre deux écritures périodiques (recalage timer TV) */
 const PERIODIC_WRITE_MS = 8000;
-
-// ----- Auth -----
 
 async function init() {
   const tokens = await handleCallback().catch(() => null);
@@ -55,26 +48,19 @@ async function init() {
 
 function setAuthUI(connected) {
   authStatus.textContent = connected ? 'Connecté' : 'Hors connexion';
-  authStatus.style.background = connected
-    ? 'rgba(34,197,94,0.15)'
-    : 'rgba(239,68,68,0.1)';
+  authStatus.style.background = connected ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.1)';
   btnPlay.disabled = !connected;
   btnPause.disabled = !connected;
   btnPrev.disabled = !connected;
   btnNext.disabled = !connected;
-  if (connected) {
-    controlsNote.textContent = '';
-  } else {
-    setSyncStatus('disconnected');
-  }
+  if (connected) controlsNote.textContent = '';
+  else setSyncStatus('disconnected');
 }
 
 async function loadCurrentUser() {
   if (!accessToken) return;
   try {
-    const res = await fetch('https://api.spotify.com/v1/me', {
-      headers: { Authorization: 'Bearer ' + accessToken },
-    });
+    const res = await fetch('https://api.spotify.com/v1/me', { headers: { Authorization: 'Bearer ' + accessToken } });
     if (!res.ok) return;
     const user = await res.json();
     connectedUser.textContent = user.display_name || user.id;
@@ -93,19 +79,11 @@ btnLogout.addEventListener('click', () => {
   resetNowPlayingUI();
 });
 
-// ----- Spotify token refresh helper -----
-
-/**
- * Effectue un appel à l'API Spotify avec rafraîchissement automatique du token en cas de 401.
- * @param {string} url
- * @returns {Promise<Response|null>}
- */
 async function spotifyFetch(url) {
   let res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
   if (res.status === 401) {
     const newToken = await refreshAccessToken();
     if (!newToken) {
-      // Refresh impossible — déconnecter proprement
       logout();
       accessToken = null;
       setAuthUI(false);
@@ -118,14 +96,9 @@ async function spotifyFetch(url) {
   return res;
 }
 
-// ----- Commandes Spotify -----
-
 async function spotifyControl(endpoint, method = 'POST') {
   if (!accessToken) return;
-  await fetch('https://api.spotify.com/v1/me/player/' + endpoint, {
-    method,
-    headers: { Authorization: 'Bearer ' + accessToken },
-  });
+  await fetch('https://api.spotify.com/v1/me/player/' + endpoint, { method, headers: { Authorization: 'Bearer ' + accessToken } });
 }
 
 btnPlay.addEventListener('click', () => spotifyControl('play', 'PUT'));
@@ -133,14 +106,12 @@ btnPause.addEventListener('click', () => spotifyControl('pause', 'PUT'));
 btnPrev.addEventListener('click', () => spotifyControl('previous'));
 btnNext.addEventListener('click', () => spotifyControl('next'));
 
-// ----- Synchronisation automatique Spotify → now_playing -----
-
 function setSyncStatus(status) {
   if (!syncStatus) return;
   const labels = {
-    playing:      '🟢 Spotify synchronisé',
-    paused:       '⏸ Spotify en pause',
-    idle:         '⚠ Aucun lecteur Spotify actif',
+    playing: '🟢 Spotify synchronisé',
+    paused: '⏸ Spotify en pause',
+    idle: '⚠ Aucun lecteur Spotify actif',
     disconnected: '🔴 Connexion Spotify nécessaire',
   };
   syncStatus.textContent = labels[status] ?? status;
@@ -148,7 +119,6 @@ function setSyncStatus(status) {
 
 function startSpotifySync() {
   if (_syncInterval) return;
-  // Premier check immédiat
   syncNowPlaying();
   _syncInterval = setInterval(syncNowPlaying, 500);
 }
@@ -162,9 +132,6 @@ function stopSpotifySync() {
   setSyncStatus('disconnected');
 }
 
-/**
- * Interroge l'API Spotify et met à jour Supabase si le morceau a changé.
- */
 async function syncNowPlaying() {
   if (!accessToken) return;
 
@@ -176,15 +143,12 @@ async function syncNowPlaying() {
     return;
   }
 
-  if (!res) return; // token refresh failed — already handled
-
-  // 204 = aucun lecteur actif
+  if (!res) return;
   if (res.status === 204) {
     setSyncStatus('idle');
     updateNowPlayingAdminUI(null);
     return;
   }
-
   if (!res.ok) {
     console.warn('Erreur currently-playing :', res.status);
     return;
@@ -192,7 +156,6 @@ async function syncNowPlaying() {
 
   const data = await res.json();
   const item = data?.item;
-
   if (!item || data.currently_playing_type !== 'track') {
     setSyncStatus('idle');
     updateNowPlayingAdminUI(null);
@@ -217,12 +180,9 @@ async function syncNowPlaying() {
   const trackChanged = track.spotify_track_id !== _lastSyncedTrackId;
   const playStateChanged = track.is_playing !== _lastSyncedIsPlaying;
   const periodicDue = now - _lastPeriodicWrite >= PERIODIC_WRITE_MS;
-
   if (!trackChanged && !playStateChanged && !periodicDue) return;
 
-  if (trackChanged) {
-    _lastSyncedTrackId = track.spotify_track_id;
-  }
+  if (trackChanged) _lastSyncedTrackId = track.spotify_track_id;
   _lastSyncedIsPlaying = track.is_playing;
   _lastPeriodicWrite = now;
   await writeNowPlayingToSupabase(track);
@@ -231,13 +191,13 @@ async function syncNowPlaying() {
 async function writeNowPlayingToSupabase(track) {
   try {
     console.log('[now_playing] Tentative écriture :', track.spotify_track_id, track.title);
-    // Supprimer l'ancienne ligne
     const { error: delErr } = await supabase.from('now_playing').delete().not('id', 'is', null);
     if (delErr) console.warn('[now_playing] Erreur delete :', delErr);
     const { data, error } = await supabase.from('now_playing').insert({
       spotify_track_id: track.spotify_track_id,
       title: track.title,
       artist: track.artist,
+      album: track.album,
       image_url: track.image_url,
       started_at: new Date().toISOString(),
       duration_ms: track.duration_ms ?? null,
@@ -271,7 +231,6 @@ function updateNowPlayingAdminUI(track) {
   if (titleEl) titleEl.textContent = track.title;
   if (artistEl) artistEl.textContent = track.artist;
   if (coverEl && track.image_url) {
-    // Validate URL to prevent CSS injection
     const safeUrl = /^https:\/\//.test(track.image_url) ? track.image_url : '';
     if (safeUrl) {
       coverEl.className = 'cover np-cover';
@@ -294,8 +253,6 @@ function resetNowPlayingUI() {
   updateNowPlayingAdminUI(null);
 }
 
-// ----- Demandes invités -----
-
 async function loadRequests() {
   try {
     const rows = await fetchPendingRequests();
@@ -312,18 +269,14 @@ function renderRequests(rows) {
     return;
   }
   requestsList.innerHTML = '';
-  for (const row of rows) {
-    requestsList.appendChild(buildRequestItem(row));
-  }
+  for (const row of rows) requestsList.appendChild(buildRequestItem(row));
 }
 
 function buildRequestItem(row) {
   const article = document.createElement('article');
   article.className = 'request-card';
   article.dataset.id = row.id;
-  const nameHtml = row.guest_name
-    ? `<span class="muted guest-name">Demandé par ${escHtml(row.guest_name)}</span>`
-    : `<span class="muted guest-name">Anonyme</span>`;
+  const nameHtml = row.guest_name ? `<span class="muted guest-name">Demandé par ${escHtml(row.guest_name)}</span>` : `<span class="muted guest-name">Anonyme</span>`;
   article.innerHTML = `
     ${row.album_art ? `<img class="cover" src="${escHtml(row.album_art)}" alt="pochette" width="56" height="56" loading="lazy">` : '<div class="cover placeholder" aria-hidden="true"></div>'}
     <div class="request-info">
@@ -349,12 +302,8 @@ async function updateStatus(id, status, articleEl) {
     return;
   }
   articleEl.remove();
-  if (!requestsList.querySelector('.request-card')) {
-    requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
-  }
+  if (!requestsList.querySelector('.request-card')) requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
 }
-
-// ----- Now Playing manuel (fallback) -----
 
 async function setNowPlayingManual(row, articleEl) {
   const btn = articleEl.querySelector('[data-action="play"]');
@@ -365,6 +314,7 @@ async function setNowPlayingManual(row, articleEl) {
       spotify_track_id: row.spotify_id ?? null,
       title: row.title,
       artist: row.artist,
+      album: row.album ?? null,
       image_url: row.album_art ?? null,
       started_at: new Date().toISOString(),
       duration_ms: null,
@@ -374,7 +324,6 @@ async function setNowPlayingManual(row, articleEl) {
     }).select();
     if (error) throw error;
     console.log('[now_playing] Écriture manuelle OK :', data);
-    // Mettre à jour l'état local pour éviter un re-sync immédiat si même track
     _lastSyncedTrackId = row.spotify_id ?? null;
     _lastSyncedIsPlaying = true;
     _lastPeriodicWrite = Date.now();
@@ -390,8 +339,6 @@ async function setNowPlayingManual(row, articleEl) {
 function handleRealtimeChange() {
   loadRequests();
 }
-
-// ----- Score volume (lecture seule, fenêtre 2 min) -----
 
 async function loadVolumeScore() {
   try {
