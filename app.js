@@ -3,7 +3,7 @@
 console.log('GROG app.js chargé');
 
 import { searchTracks } from './spotify.js';
-import { submitRequest, fetchPendingRequests, subscribeToQueue } from './queue.js';
+import { submitRequest, fetchPendingRequests, subscribeToQueue, getSessionId } from './queue.js';
 import { castVote, hasVoted, getVote } from './votes.js';
 import { supabase } from './supabase.js';
 import { escHtml } from './utils.js';
@@ -141,8 +141,7 @@ async function handleVolClick(direction) {
   updateVolumeUI();
   // Persister le vote dans Supabase pour que l'admin puisse voir les totaux
   try {
-    const sessionId = localStorage.getItem('grog_session_id') ?? crypto.randomUUID();
-    await supabase.from('volume_votes').insert({ direction, session_id: sessionId });
+    await supabase.from('volume_votes').insert({ direction, session_id: getSessionId() });
   } catch (err) {
     console.error('Erreur vote volume :', err);
   }

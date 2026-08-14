@@ -119,7 +119,7 @@ function buildRequestItem(row) {
       <strong>${escHtml(row.title)}</strong>
       <span class="muted">${escHtml(row.artist)}</span>
     </div>
-    <span class="vote-count">${row.votes ?? 0} 👍</span>
+    <span class="vote-count">${row.request_count ?? 1}×</span>
     <button type="button" class="badge-accept" data-action="accept">✓</button>
     <button type="button" class="badge-reject" data-action="reject">✕</button>
   `;

@@ -22,8 +22,9 @@ async function getToken() {
 
   const { access_token, expires_in } = await res.json();
   _cachedToken = access_token;
-  // Expire 60 s avant la date réelle pour éviter les courses
-  _tokenExpiry = Date.now() + (expires_in - 60) * 1000;
+  // Expire 60 s avant la date réelle pour éviter les courses.
+  // Fallback à 3600 s si expires_in est absent de la réponse.
+  _tokenExpiry = Date.now() + ((expires_in ?? 3600) - 60) * 1000;
   return _cachedToken;
 }
 

@@ -8,9 +8,10 @@ const TABLE = 'song_requests';
 
 /**
  * Retourne un identifiant de session anonyme persistent dans localStorage.
+ * Crée et sauvegarde un UUID si aucun n'existe encore.
  * @returns {string}
  */
-function getSessionId() {
+export function getSessionId() {
   let id = localStorage.getItem('grog_session_id');
   if (!id) {
     id = crypto.randomUUID();
