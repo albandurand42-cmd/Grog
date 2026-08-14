@@ -24,8 +24,14 @@ const syncStatus = document.getElementById('sync-status');
 let accessToken = null;
 /** Spotify track ID du dernier morceau écrit dans now_playing */
 let _lastSyncedTrackId = null;
+/** Dernière valeur de is_playing écrite dans Supabase */
+let _lastSyncedIsPlaying = null;
+/** Timestamp (Date.now()) de la dernière écriture périodique dans Supabase */
+let _lastPeriodicWrite = 0;
 /** Intervalle de polling Spotify */
 let _syncInterval = null;
+/** Intervalle en ms entre deux écritures périodiques (recalage timer TV) */
+const PERIODIC_WRITE_MS = 8000;
 
 // ----- Auth -----
 
@@ -207,10 +213,18 @@ async function syncNowPlaying() {
   setSyncStatus(track.is_playing ? 'playing' : 'paused');
   updateNowPlayingAdminUI(track);
 
-  // N'écrire dans Supabase que si le morceau a changé
-  if (track.spotify_track_id === _lastSyncedTrackId) return;
+  const now = Date.now();
+  const trackChanged = track.spotify_track_id !== _lastSyncedTrackId;
+  const playStateChanged = track.is_playing !== _lastSyncedIsPlaying;
+  const periodicDue = now - _lastPeriodicWrite >= PERIODIC_WRITE_MS;
 
-  _lastSyncedTrackId = track.spotify_track_id;
+  if (!trackChanged && !playStateChanged && !periodicDue) return;
+
+  if (trackChanged) {
+    _lastSyncedTrackId = track.spotify_track_id;
+  }
+  _lastSyncedIsPlaying = track.is_playing;
+  _lastPeriodicWrite = now;
   await writeNowPlayingToSupabase(track);
 }
 
@@ -226,6 +240,10 @@ async function writeNowPlayingToSupabase(track) {
       artist: track.artist,
       image_url: track.image_url,
       started_at: new Date().toISOString(),
+      duration_ms: track.duration_ms ?? null,
+      progress_ms: track.progress_ms ?? 0,
+      is_playing: track.is_playing ?? false,
+      synced_at: new Date().toISOString(),
     }).select();
     if (error) throw error;
     console.log('[now_playing] Écriture OK :', data);
@@ -349,11 +367,17 @@ async function setNowPlayingManual(row, articleEl) {
       artist: row.artist,
       image_url: row.album_art ?? null,
       started_at: new Date().toISOString(),
+      duration_ms: null,
+      progress_ms: 0,
+      is_playing: true,
+      synced_at: new Date().toISOString(),
     }).select();
     if (error) throw error;
     console.log('[now_playing] Écriture manuelle OK :', data);
     // Mettre à jour l'état local pour éviter un re-sync immédiat si même track
     _lastSyncedTrackId = row.spotify_id ?? null;
+    _lastSyncedIsPlaying = true;
+    _lastPeriodicWrite = Date.now();
     btn.textContent = '▶️';
     setTimeout(() => { btn.textContent = '▶'; btn.disabled = false; }, 2000);
   } catch (err) {
