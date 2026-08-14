@@ -1,5 +1,7 @@
 // Contrôleur principal de la page invité (index.html).
 
+console.log('GROG app.js chargé');
+
 import { searchTracks } from './spotify.js';
 import { submitRequest, fetchPendingRequests, subscribeToQueue } from './queue.js';
 import { castVote, hasVoted, getVote } from './votes.js';
@@ -7,6 +9,7 @@ import { supabase } from './supabase.js';
 import { escHtml } from './utils.js';
 
 // ----- Sélecteurs DOM -----
+const guestNameInput = document.getElementById('guest-name');
 const searchInput = document.getElementById('search-input');
 const searchBtn = document.getElementById('search-btn');
 const searchResults = document.getElementById('search-results');
@@ -25,7 +28,8 @@ async function handleSearch() {
     const tracks = await searchTracks(query);
     renderResults(tracks);
   } catch (err) {
-    searchResults.innerHTML = `<p class="muted">Erreur : ${err.message}</p>`;
+    console.error('Erreur recherche Spotify :', err);
+    searchResults.innerHTML = `<div class="empty-state error-state">Impossible de rechercher les morceaux. Réessaie dans un instant.</div>`;
   }
 }
 
@@ -59,22 +63,32 @@ async function onRequestClick(track, articleEl) {
   const btn = articleEl.querySelector('.request-btn');
   btn.disabled = true;
   btn.textContent = '…';
+  const guestName = guestNameInput ? guestNameInput.value.trim() : '';
   try {
-    await submitRequest(track);
+    await submitRequest(track, guestName);
     btn.textContent = '✓ Demandé';
     btn.classList.replace('primary', 'secondary');
   } catch (err) {
+    console.error('Erreur demande :', err);
     btn.disabled = false;
     btn.textContent = 'Demander';
-    alert('Impossible de soumettre la demande : ' + err.message);
+    searchResults.insertAdjacentHTML(
+      'afterend',
+      `<p class="muted error-state">Impossible de soumettre la demande. Réessaie.</p>`
+    );
   }
 }
 
 // ----- File d'attente en temps réel -----
 
 async function loadQueue() {
-  const rows = await fetchPendingRequests();
-  renderQueue(rows);
+  try {
+    const rows = await fetchPendingRequests();
+    renderQueue(rows);
+  } catch (err) {
+    console.error('Erreur chargement file :', err);
+    queueList.innerHTML = '<div class="empty-state error-state">Impossible de charger les demandes.</div>';
+  }
 }
 
 function renderQueue(rows) {
@@ -92,19 +106,20 @@ function buildQueueItem(row) {
   const article = document.createElement('article');
   article.className = 'request-card';
   article.dataset.id = row.id;
+  const count = row.request_count ?? 1;
+  const nameHtml = row.guest_name ? ` <span class="muted guest-name">— ${escHtml(row.guest_name)}</span>` : '';
   article.innerHTML = `
     ${row.album_art ? `<img class="cover" src="${escHtml(row.album_art)}" alt="pochette" width="56" height="56" loading="lazy">` : '<div class="cover placeholder" aria-hidden="true"></div>'}
     <div class="request-info">
-      <strong>${escHtml(row.title)}</strong>
+      <strong>${escHtml(row.title)}</strong>${nameHtml}
       <span class="muted">${escHtml(row.artist)}</span>
     </div>
-    <span class="vote-count">${row.votes ?? 0} 👍</span>
+    ${count > 1 ? `<span class="vote-count">${count}×</span>` : ''}
   `;
   return article;
 }
 
 function handleRealtimeChange() {
-  // Simple reload — pourrait être optimisé avec des updates partielles
   loadQueue();
 }
 
@@ -120,12 +135,17 @@ function updateVolumeUI() {
   }
 }
 
-function handleVolClick(direction) {
+async function handleVolClick(direction) {
   const voted = castVote(direction);
   if (!voted) return;
   updateVolumeUI();
   // Persister le vote dans Supabase pour que l'admin puisse voir les totaux
-  supabase.from('volume_votes').insert({ direction }).catch(() => {});
+  try {
+    const sessionId = localStorage.getItem('grog_session_id') ?? crypto.randomUUID();
+    await supabase.from('volume_votes').insert({ direction, session_id: sessionId });
+  } catch (err) {
+    console.error('Erreur vote volume :', err);
+  }
 }
 
 // ----- Bootstrap -----
