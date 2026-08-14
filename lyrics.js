@@ -1,6 +1,7 @@
 // Abstraction pour les paroles synchronisées via LRCLIB.
 
 const LRCLIB_BASE = 'https://lrclib.net/api';
+const CLIENT_HEADER = 'GROG/1.0 (https://albandurand42-cmd.github.io/Grog/)';
 const memoryCache = new Map();
 
 function normalize(value) {
@@ -12,107 +13,134 @@ function normalize(value) {
     .trim();
 }
 
-function hasVersionNoise(text) {
-  return /\b(live|remix|instrumental|karaoke|acoustic|cover|edit|version)\b/i.test(text || '');
-}
-
-function scoreCandidate(track, query) {
-  let score = 0;
-  const trackName = normalize(track.trackName || track.name || '');
-  const artistName = normalize(track.artistName || track.artist || '');
-  const albumName = normalize(track.albumName || track.album || '');
-
-  if (trackName === normalize(query.track_name)) score += 100;
-  else if (trackName.includes(normalize(query.track_name))) score += 60;
-
-  if (artistName === normalize(query.artist_name)) score += 100;
-  else if (artistName.includes(normalize(query.artist_name))) score += 50;
-
-  if (query.album_name && albumName && albumName.includes(normalize(query.album_name))) score += 20;
-
-  if (typeof track.duration === 'number' && typeof query.duration === 'number') {
-    const diff = Math.abs(track.duration - query.duration);
-    if (diff <= 2) score += 80;
-    else if (diff <= 5) score += 50;
-    else if (diff <= 10) score += 20;
-    else score -= Math.min(40, diff * 2);
-  }
-
-  const text = `${trackName} ${artistName} ${albumName}`;
-  if (hasVersionNoise(text)) score -= 70;
-
-  return score;
+function hasNoise(text) {
+  return /\b(live|remix|instrumental|karaoke)\b/i.test(text || '');
 }
 
 function parseLrc(syncedLyrics) {
   const lines = [];
-  if (!syncedLyrics) return lines;
-
-  for (const rawLine of String(syncedLyrics).split(/\r?\n/)) {
-    const matches = [...rawLine.matchAll(/\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\]/g)];
+  for (const rawLine of String(syncedLyrics || '').split(/\r?\n/)) {
+    const tags = [...rawLine.matchAll(/\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\]/g)];
     const text = rawLine.replace(/\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\]/g, '').trim();
-    if (!matches.length || !text) continue;
-
-    const time = matches[matches.length - 1];
-    const minutes = Number(time[1]);
-    const seconds = Number(time[2]);
-    const centiseconds = Number((time[3] || '0').padEnd(3, '0'));
-    lines.push({ time: minutes * 60000 + seconds * 1000 + centiseconds, text });
+    if (!tags.length || !text) continue;
+    const last = tags[tags.length - 1];
+    const minutes = Number(last[1]);
+    const seconds = Number(last[2]);
+    const ms = Number((last[3] || '0').padEnd(3, '0'));
+    lines.push({ time: minutes * 60000 + seconds * 1000 + ms, text });
   }
-
   lines.sort((a, b) => a.time - b.time);
   return lines;
 }
 
-async function fetchJson(url) {
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`LRCLIB HTTP ${res.status}`);
-  return res.json();
+function scoreResult(item, track) {
+  let score = 0;
+  const tn = normalize(item.trackName || item.name || '');
+  const an = normalize(item.artistName || item.artist || '');
+  const al = normalize(item.albumName || item.album || '');
+  const qTrack = normalize(track.track_name);
+  const qArtist = normalize(track.artist_name);
+  const qAlbum = normalize(track.album_name);
+
+  if (tn === qTrack) score += 100; else if (tn.includes(qTrack)) score += 70;
+  if (an === qArtist) score += 100; else if (an.includes(qArtist)) score += 60;
+  if (qAlbum && al && al.includes(qAlbum)) score += 15;
+  if (typeof item.duration === 'number') {
+    const diff = Math.abs(item.duration - track.duration);
+    if (diff <= 1) score += 80;
+    else if (diff <= 3) score += 60;
+    else if (diff <= 6) score += 30;
+    else score -= Math.min(50, diff * 5);
+  }
+  if (hasNoise(`${tn} ${an} ${al}`) && !hasNoise(`${qTrack} ${qArtist} ${qAlbum}`)) score -= 70;
+  return score;
 }
 
-async function searchLrclib(track) {
-  const params = new URLSearchParams();
-  params.set('track_name', track.track_name);
-  params.set('artist_name', track.artist_name);
-  params.set('duration', String(Math.round(track.duration_ms / 1000)));
-  if (track.album_name) params.set('album_name', track.album_name);
+async function fetchJson(url) {
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'Lrclib-Client': CLIENT_HEADER,
+    },
+  });
+  return res;
+}
 
-  const query = params.toString();
-  const data = await fetchJson(`${LRCLIB_BASE}/search?${query}`);
-  const candidates = Array.isArray(data) ? data : (data ? [data] : []);
-  if (!candidates.length) return null;
+async function exactSearch(track) {
+  const params = new URLSearchParams({
+    track_name: track.track_name,
+    artist_name: track.artist_name,
+    album_name: track.album_name || '',
+    duration: String(Math.round(track.duration_ms / 1000)),
+  });
+  const res = await fetchJson(`${LRCLIB_BASE}/get?${params.toString()}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`LRCLIB HTTP ${res.status}`);
+  const result = await res.json();
+  return result?.syncedLyrics ? result : null;
+}
 
-  candidates.sort((a, b) => scoreCandidate(b, track) - scoreCandidate(a, track));
-  return candidates[0] || null;
+async function fallbackSearch(track) {
+  const params = new URLSearchParams({
+    track_name: track.track_name,
+    artist_name: track.artist_name,
+  });
+  const res = await fetchJson(`${LRCLIB_BASE}/search?${params.toString()}`);
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error(`LRCLIB HTTP ${res.status}`);
+  const results = await res.json();
+  return Array.isArray(results) ? results : (results ? [results] : []);
+}
+
+function chooseBest(results, track) {
+  const candidates = results.filter((r) => r && r.syncedLyrics);
+  const pool = (candidates.length ? candidates : results).filter((r) => r && !hasNoise(`${r.trackName || ''} ${r.artistName || ''} ${r.albumName || ''}`));
+  pool.sort((a, b) => scoreResult(b, track) - scoreResult(a, track));
+  return pool[0] || null;
 }
 
 export async function getSyncedLyrics(track) {
   const key = `${track.spotify_track_id || ''}::${track.track_name || ''}::${track.artist_name || ''}::${track.duration_ms || ''}`;
   if (memoryCache.has(key)) return memoryCache.get(key);
 
-  console.log('[Lyrics] Recherche :', track.track_name, track.artist_name);
+  console.log('[Lyrics] recherche:', track.track_name, track.artist_name, track.album_name, track.duration_ms);
 
   try {
-    const result = await searchLrclib(track);
-    if (!result) {
+    const exact = await exactSearch(track);
+    console.log('[Lyrics] résultat exact:', exact);
+    if (exact?.syncedLyrics) {
+      const lines = parseLrc(exact.syncedLyrics);
+      if (lines.length) {
+        console.log('[Lyrics] Paroles synchronisées :', lines.length);
+        const payload = { type: 'synced', lines, plainLyrics: exact.plainLyrics || null };
+        memoryCache.set(key, payload);
+        return payload;
+      }
+    }
+
+    const results = await fallbackSearch(track);
+    console.log('[Lyrics] résultats fallback:', results.length);
+    const best = chooseBest(results, track);
+    console.log('[Lyrics] meilleur résultat:', best?.trackName, best?.artistName, best?.duration);
+    if (!best) {
       memoryCache.set(key, null);
       return null;
     }
 
-    console.log('[Lyrics] Résultat LRCLIB trouvé');
-
-    if (result.syncedLyrics) {
-      const lines = parseLrc(result.syncedLyrics);
+    if (best.syncedLyrics) {
+      const lines = parseLrc(best.syncedLyrics);
       if (lines.length) {
         console.log('[Lyrics] Paroles synchronisées :', lines.length);
-        memoryCache.set(key, { type: 'synced', lines, title: result.trackName, artist: result.artistName });
-        return memoryCache.get(key);
+        const payload = { type: 'synced', lines, plainLyrics: best.plainLyrics || null };
+        memoryCache.set(key, payload);
+        return payload;
       }
     }
 
-    if (result.plainLyrics) {
-      memoryCache.set(key, { type: 'plain', text: result.plainLyrics, title: result.trackName, artist: result.artistName });
-      return memoryCache.get(key);
+    if (best.plainLyrics) {
+      const payload = { type: 'plain', text: best.plainLyrics };
+      memoryCache.set(key, payload);
+      return payload;
     }
 
     memoryCache.set(key, null);
@@ -122,12 +150,4 @@ export async function getSyncedLyrics(track) {
     memoryCache.set(key, null);
     return null;
   }
-}
-
-export function clearLyricsCache() {
-  memoryCache.clear();
-}
-
-export function parseSyncedLyricsText(syncedLyrics) {
-  return parseLrc(syncedLyrics);
 }
