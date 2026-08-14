@@ -4,6 +4,7 @@
 import { startPKCE, handleCallback, getStoredTokens, logout } from './auth.js';
 import { fetchPendingRequests, subscribeToQueue } from './queue.js';
 import { supabase } from './supabase.js';
+import { escHtml } from './utils.js';
 
 // ----- Sélecteurs DOM -----
 const authStatus = document.getElementById('auth-status');
@@ -32,6 +33,8 @@ async function init() {
     accessToken = stored.access_token;
     setAuthUI(true);
     await loadCurrentUser();
+  } else {
+    setAuthUI(false);
   }
 
   loadRequests();
@@ -158,6 +161,9 @@ async function loadVoteCounts() {
 
 btnResetVotes.addEventListener('click', async () => {
   if (!confirm('Réinitialiser tous les votes volume ?')) return;
+  // Supprimer toutes les lignes de la table volume_votes via une RPC dédiée.
+  // La condition `neq('id', NIL_UUID)` est un filtre universel car Supabase
+  // n'expose pas DELETE sans filtre via l'API REST cliente.
   await supabase.from('volume_votes').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   await supabase
     .channel('admin-reset')
@@ -165,15 +171,5 @@ btnResetVotes.addEventListener('click', async () => {
   volDownCount.textContent = '👇 0';
   volUpCount.textContent = '👆 0';
 });
-
-// ----- Helpers -----
-
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 init();

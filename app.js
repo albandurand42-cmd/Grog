@@ -3,6 +3,8 @@
 import { searchTracks } from './spotify.js';
 import { submitRequest, fetchPendingRequests, subscribeToQueue } from './queue.js';
 import { castVote, hasVoted, getVote } from './votes.js';
+import { supabase } from './supabase.js';
+import { escHtml } from './utils.js';
 
 // ----- Sélecteurs DOM -----
 const searchInput = document.getElementById('search-input');
@@ -122,17 +124,11 @@ function handleVolClick(direction) {
   const voted = castVote(direction);
   if (!voted) return;
   updateVolumeUI();
+  // Persister le vote dans Supabase pour que l'admin puisse voir les totaux
+  supabase.from('volume_votes').insert({ direction }).catch(() => {});
 }
 
 // ----- Bootstrap -----
-
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 searchBtn.addEventListener('click', handleSearch);
 searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleSearch(); });
