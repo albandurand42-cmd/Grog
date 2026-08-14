@@ -144,7 +144,7 @@ function startSpotifySync() {
   if (_syncInterval) return;
   // Premier check immédiat
   syncNowPlaying();
-  _syncInterval = setInterval(syncNowPlaying, 5000);
+  _syncInterval = setInterval(syncNowPlaying, 500);
 }
 
 function stopSpotifySync() {
