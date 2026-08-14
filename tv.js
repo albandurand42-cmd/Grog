@@ -16,7 +16,8 @@ const statusEl = document.getElementById('tv-status');
 let _progressMs = 0;
 let _durationMs = 0;
 let _isPlaying = false;
-let _baseSyncTime = Date.now();
+let _syncedAt = Date.now(); // Timestamp du serveur en millisecondes
+let _baseSyncTime = Date.now(); // Référence locale au moment de la sync
 let _tickInterval = null;
 let _lyricsState = null;
 let _currentTrackId = null;
@@ -30,6 +31,8 @@ function fmt(ms) {
 }
 
 function currentProgress() {
+  // Si lecture : progression = progress_ms + (maintenant - moment de sync)
+  // Sinon : progression statique = progress_ms
   const elapsed = _isPlaying ? (Date.now() - _baseSyncTime) : 0;
   return Math.min(_durationMs || Infinity, _progressMs + elapsed);
 }
@@ -151,9 +154,17 @@ async function applyTrack(row) {
   _durationMs = row.duration_ms ?? 0;
   _progressMs = row.progress_ms ?? 0;
   _isPlaying = row.is_playing ?? false;
+  // Utiliser synced_at du serveur comme référence temporelle
+  _syncedAt = row.synced_at ? new Date(row.synced_at).getTime() : Date.now();
   _baseSyncTime = Date.now();
 
-  console.log('[now_playing] TV data:', row.title, row.duration_ms, row.progress_ms);
+  console.log('[TV] Données now_playing:', {
+    title: row.title,
+    duration_ms: row.duration_ms,
+    progress_ms: row.progress_ms,
+    is_playing: row.is_playing,
+    synced_at: row.synced_at,
+  });
 
   await loadLyricsForTrack(row);
   tick();
