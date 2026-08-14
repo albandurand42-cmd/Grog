@@ -133,7 +133,7 @@ async function applyTrack(row) {
   if (titleEl)  titleEl.textContent  = row.title  ?? '';
   if (artistEl) artistEl.textContent = row.artist ?? '';
 
-    // Pochette
+  // Pochette
   if (coverEl) {
     if (row.image_url && /^https:\/\//.test(row.image_url)) {
       coverEl.src = row.image_url;
@@ -160,10 +160,10 @@ async function applyTrack(row) {
   // Paroles (rechargement uniquement si morceau différent)
   const trackKey = `${row.title}::${row.artist}::${row.duration_ms}`;
   if (trackKey !== `${_currentTitle}::${_currentArtist}::${_currentDuration}`) {
+    await loadLyrics(row.title ?? '', row.artist ?? '', row.duration_ms ?? 0);
     _currentTitle    = row.title;
     _currentArtist   = row.artist;
     _currentDuration = row.duration_ms;
-    await loadLyrics(row.title ?? '', row.artist ?? '', row.duration_ms ?? 0);
   }
 }
 
