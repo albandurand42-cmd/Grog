@@ -186,10 +186,11 @@ async function loadNowPlaying() {
     const { data, error } = await supabase
       .from('now_playing')
       .select('title, artist, image_url')
-      .order('started_at', { ascending: false })
+      .order('id', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (error) throw error;
+    console.log('[now_playing] Données reçues :', data);
     renderNowPlaying(data);
   } catch (err) {
     console.error('Erreur chargement morceau en cours :', err);
@@ -218,8 +219,11 @@ function renderNowPlaying(data) {
 // Realtime now_playing
 supabase
   .channel('public:now_playing')
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'now_playing' }, () => loadNowPlaying())
-  .subscribe();
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'now_playing' }, (payload) => {
+    console.log('[now_playing] Realtime event :', payload);
+    loadNowPlaying();
+  })
+  .subscribe((status) => console.log('[now_playing] Realtime subscribe status :', status));
 
 // ----- Bootstrap -----
 
