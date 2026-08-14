@@ -216,15 +216,19 @@ async function syncNowPlaying() {
 
 async function writeNowPlayingToSupabase(track) {
   try {
+    console.log('[now_playing] Tentative écriture :', track.spotify_track_id, track.title);
     // Supprimer l'ancienne ligne
-    await supabase.from('now_playing').delete().not('id', 'is', null);
-    const { error } = await supabase.from('now_playing').insert({
+    const { error: delErr } = await supabase.from('now_playing').delete().not('id', 'is', null);
+    if (delErr) console.warn('[now_playing] Erreur delete :', delErr);
+    const { data, error } = await supabase.from('now_playing').insert({
       spotify_track_id: track.spotify_track_id,
       title: track.title,
       artist: track.artist,
       image_url: track.image_url,
-    });
+      started_at: new Date().toISOString(),
+    }).select();
     if (error) throw error;
+    console.log('[now_playing] Écriture OK :', data);
   } catch (err) {
     console.error('Erreur écriture now_playing :', err);
   }
@@ -339,13 +343,15 @@ async function setNowPlayingManual(row, articleEl) {
   btn.disabled = true;
   try {
     await supabase.from('now_playing').delete().not('id', 'is', null);
-    const { error } = await supabase.from('now_playing').insert({
+    const { data, error } = await supabase.from('now_playing').insert({
       spotify_track_id: row.spotify_id ?? null,
       title: row.title,
       artist: row.artist,
       image_url: row.album_art ?? null,
-    });
+      started_at: new Date().toISOString(),
+    }).select();
     if (error) throw error;
+    console.log('[now_playing] Écriture manuelle OK :', data);
     // Mettre à jour l'état local pour éviter un re-sync immédiat si même track
     _lastSyncedTrackId = row.spotify_id ?? null;
     btn.textContent = '▶️';
