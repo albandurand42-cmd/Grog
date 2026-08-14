@@ -190,10 +190,10 @@ async function syncNowPlaying() {
 
 async function writeNowPlayingToSupabase(track) {
   try {
-    console.log('[now_playing] Tentative écriture :', track.spotify_track_id, track.title);
+    console.log('[ADMIN SPOTIFY] track object:', { title: track.title, duration_ms: track.duration_ms, progress_ms: track.progress_ms, is_playing: track.is_playing });
     const { error: delErr } = await supabase.from('now_playing').delete().not('id', 'is', null);
     if (delErr) console.warn('[now_playing] Erreur delete :', delErr);
-    const { data, error } = await supabase.from('now_playing').insert({
+    const insertPayload = {
       spotify_track_id: track.spotify_track_id,
       title: track.title,
       artist: track.artist,
@@ -203,10 +203,16 @@ async function writeNowPlayingToSupabase(track) {
       progress_ms: track.progress_ms,
       is_playing: track.is_playing,
       synced_at: new Date().toISOString(),
-    }).select();
+    };
+    console.log('[ADMIN INSERT] payload:', insertPayload);
+    const { data, error } = await supabase.from('now_playing').insert(insertPayload).select();
     if (error) throw error;
-    console.log('[now_playing] écrit:', track.title, track.duration_ms, track.progress_ms, track.is_playing);
-    console.log('[now_playing] Écriture OK :', data);
+    console.log('[ADMIN NOW_PLAYING]', {
+      title: data[0]?.title,
+      duration_ms: data[0]?.duration_ms,
+      progress_ms: data[0]?.progress_ms,
+      is_playing: data[0]?.is_playing,
+    });
   } catch (err) {
     console.error('Erreur écriture now_playing :', err);
   }
