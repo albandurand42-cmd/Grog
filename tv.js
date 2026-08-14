@@ -18,12 +18,12 @@ const statusEl       = document.getElementById('tv-status');
 let _progressMs   = 0;
 let _durationMs   = 0;
 let _isPlaying    = false;
-let _syncedAt     = null;   // Date object du dernier synced_at reçu
+let _syncedAt     = null;
 let _tickInterval = null;
 let _currentTitle  = null;
 let _currentArtist = null;
 let _currentDuration = null;
-let _lyrics        = null;  // tableau [{time, text}] ou null
+let _lyrics        = null;
 
 // ----- Helpers -----
 
@@ -38,6 +38,18 @@ function localProgress() {
   if (!_isPlaying || !_syncedAt) return _progressMs;
   const elapsed = Date.now() - _syncedAt.getTime();
   return Math.min(_durationMs || Infinity, _progressMs + elapsed);
+}
+
+function setNoTrackState() {
+  if (coverEl) { coverEl.src = ''; coverEl.style.display = 'none'; }
+  if (coverPlaceholder) coverPlaceholder.style.display = 'flex';
+  if (titleEl)  titleEl.textContent  = 'Aucun morceau en cours';
+  if (artistEl) artistEl.textContent = '';
+  if (timerEl)  timerEl.textContent  = '0:00 / 0:00';
+  if (progressFill) progressFill.style.width = '0%';
+  if (lyricsEl) lyricsEl.textContent = '';
+  if (statusEl) statusEl.textContent = '';
+  stopTick();
 }
 
 // ----- Paroles -----
@@ -58,7 +70,6 @@ async function loadLyrics(title, artist, duration) {
 
 function renderLyrics(progressMs) {
   if (!_lyrics || !lyricsEl) return;
-  // Trouver la ligne courante : dernière ligne dont time <= progressMs
   let idx = 0;
   for (let i = 0; i < _lyrics.length; i++) {
     if (_lyrics[i].time <= progressMs) idx = i;
@@ -71,11 +82,8 @@ function renderLyrics(progressMs) {
     p.className = 'lyric-line' + (i === idx ? ' lyric-active' : '');
     lyricsEl.appendChild(p);
   });
-  // Faire défiler la ligne active
   const active = lyricsEl.querySelector('.lyric-active');
-  if (active) {
-    active.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }
+  if (active) active.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 // ----- Timer tick -----
@@ -83,20 +91,8 @@ function renderLyrics(progressMs) {
 function tick() {
   const progress = localProgress();
   const duration = _durationMs;
-
-  // Timer
-  if (timerEl) {
-    timerEl.textContent = duration
-      ? `${fmt(progress)} / ${fmt(duration)}`
-      : fmt(progress);
-  }
-
-  // Barre de progression
-  if (progressFill && duration > 0) {
-    progressFill.style.width = `${Math.min(100, (progress / duration) * 100).toFixed(2)}%`;
-  }
-
-  // Paroles
+  if (timerEl) timerEl.textContent = duration ? `${fmt(progress)} / ${fmt(duration)}` : fmt(progress);
+  if (progressFill && duration > 0) progressFill.style.width = `${Math.min(100, (progress / duration) * 100).toFixed(2)}%`;
   if (_lyrics) renderLyrics(progress);
 }
 
@@ -116,24 +112,13 @@ function stopTick() {
 
 async function applyTrack(row) {
   if (!row) {
-    // Aucun morceau
-    if (coverEl) { coverEl.src = ''; coverEl.style.display = 'none'; }
-    if (coverPlaceholder) coverPlaceholder.style.display = 'flex';
-    if (titleEl)  titleEl.textContent  = 'Aucun morceau en cours';
-    if (artistEl) artistEl.textContent = '';
-    if (timerEl)  timerEl.textContent  = '0:00 / 0:00';
-    if (progressFill) progressFill.style.width = '0%';
-    if (lyricsEl) lyricsEl.textContent = '';
-    if (statusEl) statusEl.textContent = '';
-    stopTick();
+    setNoTrackState();
     return;
   }
 
-  // Affichage de base
   if (titleEl)  titleEl.textContent  = row.title  ?? '';
   if (artistEl) artistEl.textContent = row.artist ?? '';
 
-  // Pochette
   if (coverEl) {
     if (row.image_url && /^https:\/\//.test(row.image_url)) {
       coverEl.src = row.image_url;
@@ -147,17 +132,14 @@ async function applyTrack(row) {
     }
   }
 
-  // Recaler le timer
   _durationMs  = row.duration_ms  ?? 0;
   _progressMs  = row.progress_ms  ?? 0;
   _isPlaying   = row.is_playing   ?? false;
   _syncedAt    = row.synced_at ? new Date(row.synced_at) : new Date();
 
-  tick(); // affichage immédiat
-
+  tick();
   if (_isPlaying) startTick(); else stopTick();
 
-  // Paroles (rechargement uniquement si morceau différent)
   const trackKey = `${row.title}::${row.artist}::${row.duration_ms}`;
   if (trackKey !== `${_currentTitle}::${_currentArtist}::${_currentDuration}`) {
     await loadLyrics(row.title ?? '', row.artist ?? '', row.duration_ms ?? 0);
@@ -173,16 +155,31 @@ async function loadCurrent() {
   if (statusEl) statusEl.textContent = 'Chargement…';
   try {
     const { data, error } = await supabase
+      .schema('public')
       .from('now_playing')
-      .select('title, artist, image_url, duration_ms, progress_ms, is_playing, synced_at')
+      .select('id, spotify_track_id, title, artist, image_url, started_at, duration_ms, progress_ms, is_playing, synced_at')
+      .order('id', { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (error) throw error;
+
+    console.log('[TV] Supabase connecté');
+    console.log('[TV] now_playing reçu:', data);
+    if (error) {
+      console.error('[TV] erreur Supabase:', error);
+      throw error;
+    }
+
     if (statusEl) statusEl.textContent = '';
+    if (!data) {
+      setNoTrackState();
+      return;
+    }
+
     await applyTrack(data);
   } catch (err) {
-    console.error('[TV] Erreur chargement initial :', err);
-    if (statusEl) statusEl.textContent = 'Erreur de connexion';
+    console.error('[TV] erreur Supabase:', err);
+    if (statusEl) statusEl.textContent = 'Aucun morceau en cours';
+    setNoTrackState();
   }
 }
 
