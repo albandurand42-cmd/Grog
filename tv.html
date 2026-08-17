@@ -24,33 +24,30 @@
       font-family: Arial, Helvetica, sans-serif;
     }
 
-    /* ── Layout principal ─────────────────────────────── */
+    /* ── Conteneur principal ─────────────────────────────── */
     .tv-shell {
-      display: grid;
       width: 100vw;
       height: 100vh;
-      grid-template-columns: 1fr;
-      grid-template-rows: auto 1fr auto;
-      gap: 0;
+      position: relative;
+      overflow: hidden;
     }
 
-    /* ── Zone haute (pochette + titre/artiste/progression) ─────────────────────────── */
-    .tv-top-section {
+    /* ── Bloc supérieur : Pochette + Titre/Artiste/Progression ──────────────────── */
+    .tv-top-block {
+      position: absolute;
+      left: 30px;
+      top: 25px;
       display: flex;
       gap: 30px;
-      padding: 30px 40px;
       align-items: flex-start;
-      min-height: 280px;
+      width: 1100px;
     }
 
-    /* ── Pochette ─────────────────────────────────────── */
+    /* Pochette */
     .tv-cover-col {
-      flex: 0 0 250px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 250px;
-      min-height: 250px;
+      flex: 0 0 220px;
+      width: 220px;
+      height: 220px;
     }
 
     #tv-cover {
@@ -76,24 +73,22 @@
       color: var(--muted);
     }
 
-    /* ── Infos et contrôles (titre/artiste/progression/timer) ─────────────────────── */
+    /* Bloc infos (titre, artiste, progression, timer) */
     .tv-info-col {
       flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      justify-content: flex-start;
-      padding-top: 0;
+      gap: 10px;
     }
 
     #tv-title {
       font-size: 52px;
       font-weight: 700;
       line-height: 1.1;
-      white-space: normal;
+      color: var(--text);
       word-wrap: break-word;
       overflow-wrap: break-word;
-      color: var(--text);
+      max-width: 850px;
       max-height: 120px;
       overflow: hidden;
     }
@@ -101,19 +96,19 @@
     #tv-artist {
       font-size: 28px;
       color: var(--muted);
-      white-space: normal;
       word-wrap: break-word;
       overflow-wrap: break-word;
+      max-width: 850px;
     }
 
     /* Barre de progression */
     .tv-progress-track {
-      width: 100%;
+      width: 850px;
       height: 8px;
       background: rgba(255,255,255,0.1);
       border-radius: 999px;
       overflow: hidden;
-      margin-top: 8px;
+      margin-top: 6px;
     }
 
     #tv-progress-fill {
@@ -131,36 +126,37 @@
       margin-top: 4px;
     }
 
-    /* ── Zone centrale (paroles) ─────────────────────────────────────── */
-    .tv-middle-section {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      padding: 40px 60px;
-      overflow: hidden;
-      position: relative;
-    }
-
-    .tv-lyrics-wrap {
-      width: calc(100% - 400px);
-      height: 100%;
+    /* ── Bloc paroles ─────────────────────────────────────── */
+    .tv-lyrics-block {
+      position: absolute;
+      left: 50px;
+      top: 330px;
+      width: 1360px;
+      height: 480px;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      position: relative;
+    }
+
+    .tv-lyrics-wrap {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
     }
 
     #tv-lyrics {
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 16px;
       height: fit-content;
     }
 
     .lyric-line {
       color: var(--muted);
       transition: color 0.3s, font-size 0.3s;
-      line-height: 1.2;
+      line-height: 1.25;
       text-align: left;
       word-wrap: break-word;
       overflow-wrap: break-word;
@@ -168,57 +164,34 @@
 
     .lyric-prev,
     .lyric-next {
-      font-size: 26px;
+      font-size: 30px;
       color: var(--muted);
     }
 
     .lyric-active {
       color: var(--text);
-      font-size: 56px;
+      font-size: 60px;
       font-weight: 700;
-      line-height: 1.2;
+      line-height: 1.25;
     }
 
-    /* Message statut */
     #tv-status {
       font-size: 14px;
       color: var(--muted);
-      text-align: center;
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      width: 100%;
+      text-align: left;
+      margin-top: 20px;
     }
 
-    /* ── Zone basse (QR + GROG) ─────────────────────────────────────── */
-    .tv-bottom-section {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
-      padding: 20px 40px 40px 40px;
-      min-height: 120px;
-      position: relative;
-    }
-
-    .tv-footer {
-      display: flex;
-      align-items: flex-end;
-    }
-
-    .tv-logo {
-      font-size: 28px;
-      font-weight: 800;
-      letter-spacing: 0.25em;
-      color: var(--accent);
-      opacity: 0.5;
-    }
-
-    /* ── QR code ─────────────────────────────────────── */
+    /* ── QR code (positionné en absolu) ─────────────────────────────── */
     .tv-qr-col {
+      position: absolute;
+      right: 50px;
+      bottom: 50px;
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 12px;
+      z-index: 10;
     }
 
     .tv-qr-box {
@@ -232,7 +205,7 @@
     }
 
     .tv-qr-box img {
-      width: 300px;
+      width: 320px;
       height: auto;
       aspect-ratio: 7 / 8;
       display: block;
@@ -244,16 +217,31 @@
       font-size: 14px;
       color: var(--muted);
       text-align: center;
-      width: 300px;
+      width: 320px;
       line-height: 1.3;
+    }
+
+    /* ── Logo GROG (positionné en absolu) ─────────────────────────────── */
+    .tv-footer {
+      position: absolute;
+      left: 40px;
+      bottom: 35px;
+    }
+
+    .tv-logo {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 0.25em;
+      color: var(--accent);
+      opacity: 0.5;
     }
   </style>
 </head>
 <body>
   <div class="tv-shell">
 
-    <!-- Zone haute : Pochette + Titre/Artiste/Progression -->
-    <div class="tv-top-section">
+    <!-- Bloc haut : Pochette + Titre/Artiste/Progression/Timer -->
+    <div class="tv-top-block">
       <div class="tv-cover-col">
         <img id="tv-cover" alt="Pochette" />
         <div class="cover-placeholder" id="tv-cover-placeholder" aria-hidden="true">🎵</div>
@@ -268,27 +256,27 @@
       </div>
     </div>
 
-    <!-- Zone centrale : Paroles -->
-    <div class="tv-middle-section">
+    <!-- Bloc paroles -->
+    <div class="tv-lyrics-block">
       <div class="tv-lyrics-wrap">
         <div id="tv-lyrics"></div>
+        <div id="tv-status"></div>
       </div>
-      <div id="tv-status"></div>
     </div>
 
-    <!-- Zone basse : GROG + QR -->
-    <div class="tv-bottom-section">
-      <div class="tv-footer">
-        <span class="tv-logo">GROG</span>
+    <!-- QR code (absolu en bas à droite) -->
+    <div class="tv-qr-col">
+      <div class="tv-qr-box">
+        <a href="https://albandurand42-cmd.github.io/Grog/" target="_blank" rel="noopener">
+          <img src="qr-grog.png" alt="QR code GROG" />
+        </a>
       </div>
-      <div class="tv-qr-col">
-        <div class="tv-qr-box">
-          <a href="https://albandurand42-cmd.github.io/Grog/" target="_blank" rel="noopener">
-            <img src="qr-grog.png" alt="QR code GROG" />
-          </a>
-        </div>
-        <p class="tv-qr-label">Scanne pour demander un son</p>
-      </div>
+      <p class="tv-qr-label">Scanne pour demander un son</p>
+    </div>
+
+    <!-- Logo GROG (absolu en bas à gauche) -->
+    <div class="tv-footer">
+      <span class="tv-logo">GROG</span>
     </div>
 
   </div>
