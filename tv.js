@@ -110,6 +110,9 @@ async function loadLyricsForTrack(row) {
   const requestId = Math.random();
   _lyricsRequestId = requestId;
 
+  console.log('[TV] track changé:', row.spotify_track_id, row.title);
+  console.log('[TV] demande paroles');
+
   // Ne pas attendre les paroles : mettre à jour l'UI immédiatement
   if (lyricsEl) lyricsEl.innerHTML = '<p class="lyric-line">Chargement des paroles…</p>';
 
@@ -130,6 +133,7 @@ async function loadLyricsForTrack(row) {
     }
 
     _lyricsState = result;
+    console.log('[TV] paroles reçues:', result?.lines?.length ?? (result?.type === 'plain' ? 'plain' : 0));
     if (!_lyricsState) {
       if (lyricsEl) lyricsEl.innerHTML = '<p class="lyric-line lyric-active">Paroles indisponibles pour ce morceau</p>';
     } else if (_lyricsState.type === 'plain') {
