@@ -319,6 +319,11 @@ function triggerAutoDjOnTrackChange(track) {
   }, 1500);
 }
 
+function handleManualAutoDjRefresh() {
+  console.log('[AUTO-DJ] manual refresh click');
+  refreshAutoDjSuggestions('manual_click');
+}
+
 btnLogin.addEventListener('click', startPKCE);
 btnLogout.addEventListener('click', () => {
   logout();
@@ -636,8 +641,6 @@ autoDjDirBtns.forEach((btn) => {
   });
 });
 if (btnAutoDjRefresh) {
-  btnAutoDjRefresh.onclick = () => {
-    console.log('[AUTO-DJ] manual refresh click');
-    refreshAutoDjSuggestions('manual_click');
-  };
+  btnAutoDjRefresh.removeEventListener('click', handleManualAutoDjRefresh);
+  btnAutoDjRefresh.addEventListener('click', handleManualAutoDjRefresh);
 }
