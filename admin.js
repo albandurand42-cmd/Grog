@@ -21,6 +21,13 @@ const controlsNote = document.getElementById('controls-note');
 const requestsList = document.getElementById('requests-list');
 const volScoreAdmin = document.getElementById('vol-score-admin');
 const syncStatus = document.getElementById('sync-status');
+const autoDjList = document.getElementById('auto-dj-list');
+const btnAutoDjRefresh = document.getElementById('btn-auto-dj-refresh');
+
+let _lastHistoryTrackId = null;
+let _lastAutoDjTrackId = null;
+let _autoDjLoading = false;
+let _autoDjTimer = null;
 
 let accessToken = null;
 let _lastSyncedTrackId = null;
