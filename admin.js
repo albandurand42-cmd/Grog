@@ -288,6 +288,10 @@ async function syncNowPlaying() {
 
   const now = Date.now();
   const trackChanged = track.spotify_track_id !== _lastSyncedTrackId;
+  if (trackChanged) {
+  addTrackToPlayHistoryIfNeeded(track);
+  triggerAutoDjOnTrackChange(track);
+}
   const playStateChanged = track.is_playing !== _lastSyncedIsPlaying;
   const periodicDue = now - _lastPeriodicWrite >= PERIODIC_WRITE_MS;
   if (!trackChanged && !playStateChanged && !periodicDue) return;
