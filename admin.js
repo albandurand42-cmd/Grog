@@ -77,6 +77,108 @@ async function loadCurrentUser() {
   }
 }
 
+async function refreshAutoDjSuggestions(reason = 'manual') {
+  if (_autoDjLoading) return;
+  _autoDjLoading = true;
+
+  try {
+    if (autoDjList) autoDjList.innerHTML = '<p class="muted">Analyse en cours...</p>';
+    if (btnAutoDjRefresh) btnAutoDjRefresh.disabled = true;
+
+    const { data: nowPlaying, error: nowErr } = await supabase
+      .from('now_playing')
+      .select('spotify_track_id, title, artist, album')
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (nowErr) throw nowErr;
+
+    const { data: recentTracks, error: recentErr } = await supabase
+      .from('play_history')
+      .select('spotify_track_id, title, artist, played_at')
+      .order('played_at', { ascending: false })
+      .limit(10);
+    if (recentErr) throw recentErr;
+
+    const { data: requestsRaw, error: reqErr } = await supabase
+      .from('song_requests')
+      .select('title, artist, request_count, status')
+      .eq('status', 'pending')
+      .order('request_count', { ascending: false });
+    if (reqErr) throw reqErr;
+
+    const requests = (requestsRaw ?? []).map((r) => ({
+      title: r.title,
+      artist: r.artist,
+      votes: Number(r.request_count ?? 1),
+    }));
+
+    const payload = {
+      now_playing: {
+        title: nowPlaying?.title ?? '',
+        artist: nowPlaying?.artist ?? '',
+      },
+      recent_tracks: (recentTracks ?? []).map((t) => ({
+        title: t.title ?? '',
+        artist: t.artist ?? '',
+      })),
+      requests,
+    };
+
+    const aiSuggestions = await requestAutoDjSuggestions(payload);
+
+    const verified = await verifySuggestionsOnSpotify(aiSuggestions, {
+      nowPlaying: nowPlaying ?? null,
+      recentTracks: recentTracks ?? [],
+      requests,
+    });
+
+    renderAutoDjSuggestions(autoDjList, verified);
+    console.log('[AUTO-DJ] suggestions refreshed:', reason, 'count=', verified.length);
+  } catch (err) {
+    console.error('[AUTO-DJ] refresh error:', {
+      reason,
+      message: err?.message ?? String(err),
+      name: err?.name ?? 'Error',
+    });
+    if (autoDjList) autoDjList.innerHTML = '<div class="empty-state error-state">Impossible de générer les suggestions.</div>';
+  } finally {
+    _autoDjLoading = false;
+    if (btnAutoDjRefresh) btnAutoDjRefresh.disabled = false;
+  }
+}
+
+async function addTrackToPlayHistoryIfNeeded(track) {
+  if (!track?.spotify_track_id) return;
+  if (_lastHistoryTrackId === track.spotify_track_id) return;
+
+  _lastHistoryTrackId = track.spotify_track_id;
+
+  try {
+    const { error } = await supabase.from('play_history').insert({
+      spotify_track_id: track.spotify_track_id,
+      title: track.title ?? 'Titre inconnu',
+      artist: track.artist ?? 'Artiste inconnu',
+      played_at: new Date().toISOString(),
+    });
+    if (error) console.warn('[AUTO-DJ] play_history insert warning:', error.message);
+  } catch (err) {
+    console.warn('[AUTO-DJ] play_history insert exception:', err?.message ?? String(err));
+  }
+}
+
+function triggerAutoDjOnTrackChange(track) {
+  if (!track?.spotify_track_id) return;
+  if (_lastAutoDjTrackId === track.spotify_track_id) return; // 1 appel IA max / changement
+
+  _lastAutoDjTrackId = track.spotify_track_id;
+
+  if (_autoDjTimer) clearTimeout(_autoDjTimer);
+  _autoDjTimer = setTimeout(() => {
+    refreshAutoDjSuggestions('track_change');
+  }, 2000);
+}
+
 btnLogin.addEventListener('click', startPKCE);
 btnLogout.addEventListener('click', () => {
   logout();
