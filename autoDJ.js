@@ -11,11 +11,68 @@ function titleArtistKey(title, artist) {
   return `${norm(title)}::${norm(artist)}`;
 }
 
+function tokenizeInstruction(instruction) {
+  const stopWords = new Set([
+    'je', 'veux', 'de', 'du', 'des', 'la', 'le', 'les', 'et', 'un', 'une', 'pour',
+    'avec', 'vers', 'sur', 'dans', 'the', 'and', 'to', 'of', 'a', 'recent', 'récente',
+    'récents', 'assez', 'plus', 'moins', 'vraiment',
+  ]);
+  return String(instruction ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/[^a-z0-9]+/g)
+    .filter((x) => x && x.length >= 3 && !stopWords.has(x));
+}
+
+function getInstructionHintTokens(instruction) {
+  const text = String(instruction ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const hints = [];
+
+  if (/\bjazz\b/.test(text)) {
+    hints.push(
+      'jazz', 'swing', 'bebop', 'blue note',
+      'miles davis', 'john coltrane', 'dave brubeck', 'thelonious monk',
+      'duke ellington', 'ella fitzgerald', 'louis armstrong', 'bill evans'
+    );
+  }
+  if (/\btechno\b/.test(text)) {
+    hints.push('techno', 'dark techno', 'industrial', 'acid');
+  }
+  if (/\bpop\b/.test(text)) hints.push('pop');
+  if (/\bhouse\b/.test(text)) hints.push('house');
+  if (/\bsombre|dark\b/.test(text)) hints.push('dark', 'sombre');
+  if (/\brecent|nouveau|nouvelle\b/.test(text)) hints.push('202', '201');
+  if (/\bclassique|classic\b/.test(text)) hints.push('classic', 'classique');
+
+  return hints;
+}
+
+function instructionMatchScore(candidate, instruction, hintTokens) {
+  const text = `${candidate?.title ?? ''} ${candidate?.artist ?? ''} ${candidate?.reason ?? ''}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const tokens = tokenizeInstruction(instruction);
+  let score = 0;
+  for (const t of tokens) {
+    if (text.includes(t)) score += 2;
+  }
+  for (const h of hintTokens) {
+    if (text.includes(h)) score += 3;
+  }
+  return score;
+}
+
 /**
  * Request AI suggestions from Edge Function V3
  * Returns { analysis, candidates }
  */
 export async function requestAutoDjSuggestions(payload) {
+  console.log('[AUTO-DJ] sending dj_context.instruction to edge:', payload?.dj_context?.instruction ?? '');
   const res = await fetch(AUTO_DJ_FUNCTION_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -29,6 +86,7 @@ export async function requestAutoDjSuggestions(payload) {
 
   const data = await res.json();
   console.log('[AUTO-DJ] edge response', data);
+  console.log('[AUTO-DJ] edge analysis target_style:', data?.analysis?.target_style ?? '(none)');
 
   if (!data || !data.analysis || !Array.isArray(data.candidates)) {
     throw new Error('Invalid auto-dj response: missing analysis or candidates');
@@ -62,6 +120,9 @@ export async function verifySuggestionsOnSpotify(
   const recentTracks = context?.recentTracks ?? [];
   const requests = context?.requests ?? [];
   const recentSuggestions = context?.recentSuggestions ?? [];
+  const instruction = String(context?.instruction ?? '').trim();
+  const hasInstruction = instruction.length > 0;
+  const instructionHintTokens = getInstructionHintTokens(instruction);
 
   const nowId = now?.spotify_track_id ?? null;
   const nowArtist = norm(now?.artist ?? '');
@@ -87,16 +148,47 @@ export async function verifySuggestionsOnSpotify(
     .sort((a, b) => (b.votes ?? 0) - (a.votes ?? 0));
 
   // Build candidate pool: AI suggestions first, then high-voted requests
-  const candidatePool = [
-    ...candidates.map((x) => ({ ...x, source: 'ai' })),
-    ...pendingHighVotes.map((r) => ({
-      title: r.title,
-      artist: r.artist,
-      reason: r.votes > 1 ? `Demande très votée (${r.votes} votes)` : 'Demande invitée',
-      estimated_tension: 50,
-      source: 'request',
-    })),
-  ];
+  const aiCandidatesRanked = candidates
+    .map((x) => ({
+      ...x,
+      source: 'ai',
+      instructionScore: hasInstruction ? instructionMatchScore(x, instruction, instructionHintTokens) : 0,
+    }))
+    .sort((a, b) => b.instructionScore - a.instructionScore);
+
+  const requestCandidates = pendingHighVotes.map((r) => ({
+    title: r.title,
+    artist: r.artist,
+    reason: r.votes > 1 ? `Demande très votée (${r.votes} votes)` : 'Demande invitée',
+    estimated_tension: 50,
+    source: 'request',
+    instructionScore: hasInstruction ? instructionMatchScore(r, instruction, instructionHintTokens) : 0,
+  }));
+
+  const primaryPool = hasInstruction
+    ? aiCandidatesRanked.filter((c) => c.instructionScore > 0)
+    : aiCandidatesRanked;
+  const fallbackPool = hasInstruction
+    ? [
+      ...aiCandidatesRanked.filter((c) => c.instructionScore === 0),
+      ...requestCandidates.filter((c) => c.instructionScore > 0),
+      ...requestCandidates.filter((c) => c.instructionScore === 0),
+    ]
+    : requestCandidates;
+  const candidatePool = [...primaryPool, ...fallbackPool];
+
+  if (hasInstruction) {
+    console.log('[AUTO-DJ] instruction priority mode', {
+      instruction,
+      primaryCandidates: primaryPool.length,
+      fallbackCandidates: fallbackPool.length,
+      topInstructionScores: aiCandidatesRanked.slice(0, 5).map((c) => ({
+        title: c.title,
+        artist: c.artist,
+        instructionScore: c.instructionScore,
+      })),
+    });
+  }
 
   const usedIds = new Set();
   const usedKeys = new Set();
@@ -264,7 +356,7 @@ export async function markSuggestionAsPlayed(spotifyTrackId) {
 export function renderAutoDjSuggestions(container, response) {
   if (!container) return;
 
-  const { suggestions } = response;
+  const { suggestions, analysis } = response;
 
   if (!suggestions || suggestions.length === 0) {
     container.innerHTML = '<div class="empty-state">Aucune suggestion valide disponible.</div>';
@@ -272,6 +364,20 @@ export function renderAutoDjSuggestions(container, response) {
   }
 
   container.innerHTML = '';
+
+  if (analysis) {
+    const analysisBlock = document.createElement('div');
+    analysisBlock.className = 'auto-dj-analysis';
+    const currentStyle = String(analysis.current_style ?? 'Inconnu');
+    const targetStyle = String(analysis.target_style ?? currentStyle);
+    const trajectory = String(analysis.trajectory ?? 'N/A');
+    analysisBlock.innerHTML = `
+      <p class="muted"><strong>Style actuel :</strong> ${escHtml(currentStyle)}</p>
+      <p class="muted"><strong>Style cible :</strong> ${escHtml(targetStyle)}</p>
+      <p class="muted"><strong>Trajectoire :</strong> ${escHtml(trajectory)}</p>
+    `;
+    container.appendChild(analysisBlock);
+  }
 
   // Render suggestions
   const suggestionsHtml = document.createElement('div');
