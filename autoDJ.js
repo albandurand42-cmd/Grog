@@ -1,120 +1,184 @@
-import { AUTO_DJ_FUNCTION_URL } from './config.js';
 import { searchTracks } from './spotify.js';
+import { escHtml } from './utils.js';
+import { AUTO_DJ_FUNCTION_URL } from './config.js';
+
+function norm(s) {
+  return String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function titleArtistKey(title, artist) {
+  return `${norm(title)}::${norm(artist)}`;
+}
 
 export async function requestAutoDjSuggestions(payload) {
-  const response = await fetch(AUTO_DJ_FUNCTION_URL, {
+  const res = await fetch(AUTO_DJ_FUNCTION_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
 
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data?.error || 'Erreur Auto-DJ');
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`auto-dj HTTP ${res.status} ${txt}`);
   }
 
-  if (!Array.isArray(data?.suggestions) || data.suggestions.length !== 3) {
-    throw new Error('Réponse Auto-DJ invalide');
+  const json = await res.json();
+  if (!json || !Array.isArray(json.suggestions) || json.suggestions.length !== 3) {
+    throw new Error('Réponse auto-dj invalide: il faut exactement 3 suggestions');
   }
 
-  return data.suggestions;
+  const suggestions = json.suggestions.map((s) => ({
+    title: String(s?.title ?? '').trim(),
+    artist: String(s?.artist ?? '').trim(),
+    reason: String(s?.reason ?? '').trim(),
+  }));
+
+  for (const s of suggestions) {
+    if (!s.title || !s.artist || !s.reason) {
+      throw new Error('Suggestion IA incomplète');
+    }
+  }
+
+  return suggestions;
 }
 
-export async function verifySuggestionsOnSpotify(
-  suggestions,
-  currentTrackId = null,
-  recentTrackIds = []
-) {
-  const verified = [];
+/**
+ * @param {Array<{title:string,artist:string,reason:string}>} aiSuggestions
+ * @param {{
+ *   nowPlaying: { spotify_track_id?:string|null, title?:string, artist?:string }|null,
+ *   recentTracks: Array<{spotify_track_id?:string|null,title?:string,artist?:string}>,
+ *   requests: Array<{title:string,artist:string,votes:number}>
+ * }} context
+ */
+export async function verifySuggestionsOnSpotify(aiSuggestions, context) {
+  const now = context?.nowPlaying ?? null;
+  const recentTracks = context?.recentTracks ?? [];
+  const requests = context?.requests ?? [];
 
-  for (const suggestion of suggestions) {
-    const query = `${suggestion.title} ${suggestion.artist}`;
+  const nowId = now?.spotify_track_id ?? null;
+  const nowArtist = norm(now?.artist ?? '');
 
-    const results = await searchTracks(query, 5);
+  const recentIds = new Set(recentTracks.map((t) => t.spotify_track_id).filter(Boolean));
+  const recentKeys = new Set(recentTracks.map((t) => titleArtistKey(t.title, t.artist)));
 
-    if (!Array.isArray(results) || results.length === 0) continue;
+  const pendingHighVotes = requests
+    .filter((r) => r?.title && r?.artist)
+    .sort((a, b) => (b.votes ?? 0) - (a.votes ?? 0));
 
-    const best = results.find((track) => {
-      if (!track?.id) return false;
-      if (track.id === currentTrackId) return false;
-      if (recentTrackIds.includes(track.id)) return false;
-      return true;
+  // Mélange: d’abord IA, puis demandes populaires en fallback
+  const candidates = [
+    ...aiSuggestions.map((x) => ({ ...x, source: 'ai' })),
+    ...pendingHighVotes.map((r) => ({
+      title: r.title,
+      artist: r.artist,
+      reason: r.votes > 1 ? `Demande très votée (${r.votes} votes)` : 'Demande invitée',
+      source: 'request',
+    })),
+  ];
+
+  const usedIds = new Set();
+  const usedKeys = new Set();
+  const usedArtists = new Set();
+
+  const out = [];
+
+  for (const c of candidates) {
+    const q = `${c.title} ${c.artist}`.trim();
+    const results = await searchTracks(q, 8);
+    if (!results.length) continue;
+
+    let picked = null;
+
+    // 1er passage strict
+    for (const r of results) {
+      const key = titleArtistKey(r.title, r.artist);
+      const artistKey = norm(r.artist);
+
+      if (!r.id) continue;
+      if (nowId && r.id === nowId) continue;
+      if (recentIds.has(r.id)) continue;
+      if (recentKeys.has(key)) continue;
+      if (usedIds.has(r.id)) continue;
+      if (usedKeys.has(key)) continue;
+      if (usedArtists.has(artistKey)) continue;
+      if (artistKey === nowArtist) continue; // éviter même artiste que morceau courant si possible
+
+      picked = r;
+      break;
+    }
+
+    // 2e passage plus permissif (autorise même artiste courant)
+    if (!picked) {
+      for (const r of results) {
+        const key = titleArtistKey(r.title, r.artist);
+        const artistKey = norm(r.artist);
+
+        if (!r.id) continue;
+        if (nowId && r.id === nowId) continue;
+        if (recentIds.has(r.id)) continue;
+        if (recentKeys.has(key)) continue;
+        if (usedIds.has(r.id)) continue;
+        if (usedKeys.has(key)) continue;
+        if (usedArtists.has(artistKey)) continue;
+
+        picked = r;
+        break;
+      }
+    }
+
+    if (!picked) continue;
+
+    const key = titleArtistKey(picked.title, picked.artist);
+    usedIds.add(picked.id);
+    usedKeys.add(key);
+    usedArtists.add(norm(picked.artist));
+
+    out.push({
+      spotify_track_id: picked.id,
+      title: picked.title,
+      artist: picked.artist,
+      image_url: picked.albumArt ?? null,
+      uri: picked.uri ?? null,
+      external_url: picked.id ? `https://open.spotify.com/track/${encodeURIComponent(picked.id)}` : null,
+      reason: c.reason,
     });
 
-    if (!best) continue;
-
-    verified.push({
-      spotify_track_id: best.id,
-      title: best.name,
-      artist: best.artists?.map((a) => a.name).join(', ') || suggestion.artist,
-      albumArt: best.album?.images?.[0]?.url || null,
-      uri: best.uri || null,
-      externalUrl: best.external_urls?.spotify || null,
-      reason: suggestion.reason,
-    });
-
-    if (verified.length === 3) break;
+    if (out.length === 3) break;
   }
 
-  return verified;
+  return out.slice(0, 3);
 }
 
 export function renderAutoDjSuggestions(container, suggestions) {
   if (!container) return;
 
-  if (!Array.isArray(suggestions) || suggestions.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state">
-        Aucune suggestion disponible pour le moment.
-      </div>
-    `;
+  if (!suggestions?.length) {
+    container.innerHTML = '<div class="empty-state">Aucune suggestion valide disponible.</div>';
     return;
   }
 
-  container.innerHTML = suggestions
-    .map((s, index) => {
-      const cover = s.albumArt
-        ? `<img class="auto-dj-cover" src="${s.albumArt}" alt="">`
-        : `<div class="auto-dj-cover auto-dj-cover-placeholder">🎵</div>`;
+  container.innerHTML = '';
+  suggestions.forEach((s, i) => {
+    const item = document.createElement('article');
+    item.className = 'auto-dj-suggestion';
 
-      const spotifyLink = s.externalUrl
-        ? `<a
-            class="secondary auto-dj-open"
-            href="${s.externalUrl}"
-            target="_blank"
-            rel="noopener"
-          >
-            Ouvrir dans Spotify
-          </a>`
-        : '';
+    item.innerHTML = `
+      <div class="auto-dj-rank">${i + 1}</div>
+      ${
+        s.image_url
+          ? `<img class="auto-dj-cover" src="${escHtml(s.image_url)}" alt="pochette ${escHtml(s.title)}" width="56" height="56" loading="lazy">`
+          : `<div class="auto-dj-cover-placeholder" aria-hidden="true"></div>`
+      }
+      <div class="auto-dj-info">
+        <strong>${escHtml(s.title)}</strong>
+        <span class="muted">${escHtml(s.artist)}</span>
+        <small class="muted">${escHtml(s.reason)}</small>
+      </div>
+      <a class="secondary auto-dj-open" href="${escHtml(s.external_url || '#')}" target="_blank" rel="noopener noreferrer">
+        Ouvrir dans Spotify
+      </a>
+    `;
 
-      return `
-        <article class="auto-dj-suggestion">
-          <div class="auto-dj-rank">${index + 1}</div>
-
-          ${cover}
-
-          <div class="auto-dj-info">
-            <strong>${escapeHtml(s.title)}</strong>
-            <span>${escapeHtml(s.artist)}</span>
-            <p>${escapeHtml(s.reason)}</p>
-          </div>
-
-          ${spotifyLink}
-        </article>
-      `;
-    })
-    .join('');
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+    container.appendChild(item);
+  });
 }
