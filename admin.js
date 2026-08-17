@@ -6,6 +6,7 @@ import { fetchPendingRequests, subscribeToQueue } from './queue.js';
 import { supabase } from './supabase.js';
 import { escHtml } from './utils.js';
 import { fetchVolumeScore } from './votes.js';
+import { requestAutoDjSuggestions, verifySuggestionsOnSpotify, renderAutoDjSuggestions } from './autoDJ.js';
 
 // ----- Sélecteurs DOM -----
 const authStatus = document.getElementById('auth-status');
