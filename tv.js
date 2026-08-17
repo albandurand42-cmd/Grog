@@ -20,8 +20,7 @@ const LYRICS_OFFSET_MS = 300;
 let _progressMs = 0;
 let _durationMs = 0;
 let _isPlaying = false;
-let _syncedAt = Date.now();
-let _baseSyncTime = Date.now();
+let _syncedAtMs = Date.now(); // Timestamp en ms (Date.parse() résultat)
 let _tickInterval = null;
 let _lyricsState = null;
 let _currentTrackId = null;
@@ -36,8 +35,8 @@ function fmt(ms) {
 }
 
 function currentProgress() {
-  const elapsed = _isPlaying ? (Date.now() - _baseSyncTime) : 0;
-  return Math.min(_durationMs || Infinity, _progressMs + elapsed);
+  const elapsed = _isPlaying ? (Date.now() - _syncedAtMs) : 0;
+  return Math.min(_durationMs || Infinity, Math.max(0, _progressMs + elapsed));
 }
 
 function stopTick() {
@@ -77,9 +76,15 @@ function renderLyricsAt(progressMs) {
     if (lines[i].time <= lyricsProgress) idx = i;
     else break;
   }
+  
   const prev = lines[idx - 1]?.text || '';
   const curr = lines[idx]?.text || '';
   const next = lines[idx + 1]?.text || '';
+
+  // Log de diagnostic au changement de ligne
+  if (lyricsEl && curr) {
+    console.log('[LYRICS SYNC]', Math.round(progressMs), 'ms → ligne', idx, '/', lines.length, ':', curr.substring(0, 50));
+  }
 
   if (lyricsEl) {
     lyricsEl.innerHTML = `
@@ -164,6 +169,9 @@ async function applyTrack(row) {
     return;
   }
 
+  // Récupérer l'ID ancien pour détecter changement de morceau
+  const oldTrackId = _currentTrackId;
+
   // Mettre à jour immédiatement : titre, artiste, pochette
   if (titleEl) titleEl.textContent = row.title ?? '';
   if (artistEl) artistEl.textContent = row.artist ?? '';
@@ -179,14 +187,28 @@ async function applyTrack(row) {
     }
   }
 
-  // Mettre à jour le timer immédiatement
+  // Mettre à jour le timer : RECALIBRAGE À CHAQUE UPDATE
   _durationMs = row.duration_ms ?? 0;
   _progressMs = row.progress_ms ?? 0;
   _isPlaying = row.is_playing ?? false;
-  _syncedAt = row.synced_at ? new Date(row.synced_at).getTime() : Date.now();
-  _baseSyncTime = Date.now();
+  
+  // 🔧 FIX PRINCIPAL : Utiliser synced_at comme référence temporelle
+  // et non Date.now() qui créerait une dérive immédiate
+  _syncedAtMs = row.synced_at ? Date.parse(row.synced_at) : Date.now();
+  
+  // Validation : si synced_at invalide, utiliser Date.now()
+  if (isNaN(_syncedAtMs)) {
+    _syncedAtMs = Date.now();
+  }
 
-  console.log('[TV] morceau appliqué immédiatement:', row.title, row.duration_ms, row.progress_ms);
+  console.log('[TV SYNC]', {
+    track: row.spotify_track_id,
+    progress_ms: row.progress_ms,
+    duration_ms: row.duration_ms,
+    is_playing: row.is_playing,
+    synced_at: row.synced_at,
+    _syncedAtMs: _syncedAtMs
+  });
 
   // Mettre à jour l'affichage du timer IMMÉDIATEMENT
   tick();
@@ -195,15 +217,17 @@ async function applyTrack(row) {
   if (_isPlaying && _durationMs > 0) startTick();
   else stopTick();
 
-  // Changer d'ID de morceau courant
+  // Détecter changement de morceau
+  const trackChanged = oldTrackId !== row.spotify_track_id;
   _currentTrackId = row.spotify_track_id;
 
-  // Charger les paroles EN ARRIÈRE-PLAN sans bloquer
-  if (typeof row.duration_ms === 'number' && row.duration_ms > 0) {
+  // Si changement de morceau : charger les paroles EN ARRIÈRE-PLAN
+  if (trackChanged && typeof row.duration_ms === 'number' && row.duration_ms > 0) {
     loadLyricsForTrack(row);
-  } else {
-    _lyricsState = null;
-    if (lyricsEl) lyricsEl.innerHTML = '<p class="lyric-line lyric-active">Durée indisponible - paroles désactivées</p>';
+  } else if (!trackChanged) {
+    // Même morceau mais progression mise à jour : on a juste recalibré le timer
+    // Les paroles restent en mémoire, elles vont se repositionner au prochain tick
+    console.log('[TV] Même morceau, recalibrage du timer effectué');
   }
 }
 
