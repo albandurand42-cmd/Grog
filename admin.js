@@ -466,3 +466,8 @@ async function loadVolumeScore() {
 }
 
 init();
+if (btnAutoDjRefresh) {
+  btnAutoDjRefresh.addEventListener('click', () => {
+    refreshAutoDjSuggestions('manual_click');
+  });
+}
