@@ -5,6 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 
 type Direction = 'up' | 'down';
 type RoleHint = 'safe' | 'build' | 'bold' | 'neutral';
@@ -160,6 +161,41 @@ function parsePayload(body: unknown): AutoDJPayload {
   };
 }
 
+function buildDjProfileSection(profile: DJProfile | null): string {
+  if (!profile) return 'Aucun profil DJ disponible';
+  const src = asRecord(profile);
+  const lines: string[] = [];
+
+  const topArtists = Array.isArray(src.top_artists) ? src.top_artists : [];
+  if (topArtists.length > 0) {
+    const artists = topArtists
+      .slice(0, 5)
+      .map((row) => {
+        const item = asRecord(row);
+        const name = asText(item.artist, 'Artiste inconnu');
+        const count = Number.isFinite(Number(item.count)) ? Number(item.count) : 0;
+        return `${name} (${count}x)`;
+      })
+      .join(', ');
+    lines.push(`Top artistes joués: ${artists}`);
+  }
+
+  const ignoredArtists = Array.isArray(src.ignored_artists) ? src.ignored_artists : [];
+  if (ignoredArtists.length > 0) {
+    const artists = ignoredArtists
+      .slice(0, 5)
+      .map((row) => asText(asRecord(row).artist, 'Artiste inconnu'))
+      .join(', ');
+    lines.push(`Artistes souvent ignorés: ${artists}`);
+  }
+
+  if (Number.isFinite(Number(src.play_ratio_pct))) {
+    lines.push(`Taux de suggestions jouées: ${Number(src.play_ratio_pct)}%`);
+  }
+
+  return lines.length ? lines.join('\n') : 'Profil DJ présent mais sans données utiles';
+}
+
 function buildPrompt(payload: AutoDJPayload): string {
   const directionText = payload.dj_context.direction === 'down'
     ? 'DESCENDRE la tension'
@@ -187,9 +223,7 @@ function buildPrompt(payload: AutoDJPayload): string {
       .join('\n')
     : 'Aucune demande publique';
 
-  const djProfileText = payload.dj_profile
-    ? JSON.stringify(payload.dj_profile)
-    : '{}';
+  const djProfileText = buildDjProfileSection(payload.dj_profile);
 
   return [
     'Tu es Auto-DJ V3. Réponds uniquement en JSON valide.',
@@ -306,12 +340,20 @@ function validateV3Response(raw: unknown, expectedDirection: Direction): AutoDJV
     throw new Error('Invalid auto-dj response: missing candidates');
   }
 
-  const candidates = src.candidates
-    .map((c) => parseCandidate(c))
-    .filter((c): c is Candidate => Boolean(c));
+  const rawCandidates = src.candidates;
+  if (rawCandidates.length < 12 || rawCandidates.length > 20) {
+    throw new Error(
+      `Invalid auto-dj response: raw candidates count out of range (12-20), raw=${rawCandidates.length}`,
+    );
+  }
 
-  if (candidates.length < 12 || candidates.length > 20) {
-    throw new Error('Invalid auto-dj response: candidates count out of range (12-20)');
+  const candidates: Candidate[] = [];
+  for (let i = 0; i < rawCandidates.length; i += 1) {
+    const parsed = parseCandidate(rawCandidates[i]);
+    if (!parsed) {
+      throw new Error(`Invalid auto-dj response: invalid candidate at index ${i}`);
+    }
+    candidates.push(parsed);
   }
 
   return { analysis, candidates };
@@ -321,7 +363,7 @@ async function fetchAutoDJV3(payload: AutoDJPayload): Promise<AutoDJV3Response> 
   const apiKey = Deno.env.get('OPENAI_API_KEY');
   if (!apiKey) throw new Error('OPENAI_API_KEY manquant');
 
-  const model = Deno.env.get('OPENAI_MODEL') || 'gpt-4.1-mini';
+  const model = Deno.env.get('OPENAI_MODEL') || DEFAULT_OPENAI_MODEL;
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -385,8 +427,18 @@ serve(async (req) => {
   try {
     const payload = parsePayload(await req.json());
 
-    if (!payload.now_playing || payload.recent_tracks.length === 0) {
-      return new Response(JSON.stringify({ error: 'Invalid payload' }), {
+    if (!payload.now_playing || (!payload.now_playing.title && !payload.now_playing.artist)) {
+      return new Response(JSON.stringify({ error: 'Missing now_playing' }), {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
+      });
+    }
+
+    if (payload.recent_tracks.length === 0) {
+      return new Response(JSON.stringify({ error: 'recent_tracks must not be empty' }), {
         status: 400,
         headers: {
           ...corsHeaders,
