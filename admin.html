@@ -27,7 +27,31 @@
         </div>
         <p class="muted">Utilisateur connecté : <span id="connected-user">Aucun</span></p>
       </section>
+<!-- AUTO-DJ -->
+<section class="card auto-dj-card" aria-labelledby="auto-dj-title">
 
+  <div class="auto-dj-header">
+    <div>
+      <h2 id="auto-dj-title">🤖 AUTO-DJ</h2>
+      <p class="muted">Suggestions pour le prochain morceau</p>
+    </div>
+
+    <button
+      id="btn-auto-dj-refresh"
+      type="button"
+      class="secondary"
+    >
+      ↻ Nouvelles suggestions
+    </button>
+  </div>
+
+  <div id="auto-dj-list" class="auto-dj-list">
+    <div class="empty-state">
+      Les suggestions apparaîtront ici.
+    </div>
+  </div>
+
+</section>
       <!-- Now Playing + Commandes -->
       <section class="grid">
         <article class="card now-playing" aria-labelledby="now-playing-title">
