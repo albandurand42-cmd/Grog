@@ -5,6 +5,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+
+type Direction = 'up' | 'down';
+type RoleHint = 'safe' | 'build' | 'bold' | 'neutral';
 
 type TrackLike = {
   spotify_track_id?: string | null;
@@ -19,162 +23,348 @@ type RequestLike = {
   votes?: number | null;
 };
 
-type Suggestion = {
+type RecentSuggestionLike = {
+  title?: string | null;
+  artist?: string | null;
+  role?: string | null;
+  role_hint?: string | null;
+  was_played?: boolean | null;
+};
+
+type DJProfile = Record<string, unknown>;
+
+type AutoDJPayload = {
+  now_playing: TrackLike | null;
+  recent_tracks: TrackLike[];
+  recent_suggestions: RecentSuggestionLike[];
+  requests: RequestLike[];
+  dj_context: { direction: Direction };
+  dj_profile: DJProfile | null;
+};
+
+type Analysis = {
+  current_style: string;
+  trajectory: string;
+  energy_estimate: number;
+  direction: Direction;
+  confidence: number;
+};
+
+type Candidate = {
   title: string;
   artist: string;
   reason: string;
-  role: 'safe' | 'build' | 'bold';
-  estimated_tension: number | null;
+  role_hint: RoleHint;
+  estimated_tension: number;
 };
 
-type DJProfile = {
-  top_artists?: { artist: string; count: number }[];
-  top_tracks?: { title: string; artist: string; count: number }[];
-  ignored_artists?: { artist: string; ignored: number }[];
-  total_suggestions?: number;
-  total_played?: number;
-  play_ratio_pct?: number | null;
+type AutoDJV3Response = {
+  analysis: Analysis;
+  candidates: Candidate[];
 };
 
-function asText(value: unknown, fallback = '') {
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function asText(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value.trim() : fallback;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+function asIntInRange(value: unknown, min: number, max: number): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return null;
+  if (n < min || n > max) return null;
+  return n;
 }
 
-function normalizeDirection(value: unknown) {
+function asNumberInRange(value: unknown, min: number, max: number): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  if (n < min || n > max) return null;
+  return n;
+}
+
+function normalizeDirection(value: unknown): Direction {
   return value === 'down' ? 'down' : 'up';
 }
 
-function clampTension(value: unknown) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  return Math.max(0, Math.min(100, Math.round(numeric)));
+function parsePayload(body: unknown): AutoDJPayload {
+  const root = asRecord(body);
+  const now = asRecord(root.now_playing);
+
+  const now_playing: TrackLike | null = root.now_playing
+    ? {
+      spotify_track_id: asText(now.spotify_track_id ?? ''),
+      title: asText(now.title ?? ''),
+      artist: asText(now.artist ?? ''),
+      played_at: asText(now.played_at ?? ''),
+    }
+    : null;
+
+  const recent_tracks = Array.isArray(root.recent_tracks)
+    ? root.recent_tracks
+      .map((row) => {
+        const item = asRecord(row);
+        return {
+          spotify_track_id: asText(item.spotify_track_id ?? ''),
+          title: asText(item.title ?? ''),
+          artist: asText(item.artist ?? ''),
+          played_at: asText(item.played_at ?? ''),
+        };
+      })
+      .filter((t) => t.title || t.artist)
+      .slice(-25)
+    : [];
+
+  const recent_suggestions = Array.isArray(root.recent_suggestions)
+    ? root.recent_suggestions
+      .map((row) => {
+        const item = asRecord(row);
+        return {
+          title: asText(item.title ?? ''),
+          artist: asText(item.artist ?? ''),
+          role: asText(item.role ?? ''),
+          role_hint: asText(item.role_hint ?? ''),
+          was_played: Boolean(item.was_played),
+        };
+      })
+      .filter((s) => s.title || s.artist)
+      .slice(-40)
+    : [];
+
+  const requests = Array.isArray(root.requests)
+    ? root.requests
+      .map((row) => {
+        const item = asRecord(row);
+        return {
+          title: asText(item.title ?? ''),
+          artist: asText(item.artist ?? ''),
+          votes: Number.isFinite(Number(item.votes)) ? Number(item.votes) : 0,
+        };
+      })
+      .filter((r) => r.title || r.artist)
+      .slice(0, 25)
+    : [];
+
+  return {
+    now_playing,
+    recent_tracks,
+    recent_suggestions,
+    requests,
+    dj_context: {
+      direction: normalizeDirection(asRecord(root.dj_context).direction),
+    },
+    dj_profile: root.dj_profile && typeof root.dj_profile === 'object'
+      ? (root.dj_profile as DJProfile)
+      : null,
+  };
 }
 
-function normalizeRole(value: unknown, index: number): Suggestion['role'] {
-  const role = asText(value).toLowerCase();
-  if (role === 'safe' || role === 'build' || role === 'bold') return role;
-  return ['safe', 'build', 'bold'][index] as Suggestion['role'];
+function buildDjProfileSection(profile: DJProfile | null): string {
+  if (!profile) return 'Aucun profil DJ disponible';
+  const src = asRecord(profile);
+  const lines: string[] = [];
+
+  const topArtists = Array.isArray(src.top_artists) ? src.top_artists : [];
+  if (topArtists.length > 0) {
+    const artists = topArtists
+      .slice(0, 5)
+      .map((row) => {
+        const item = asRecord(row);
+        const name = asText(item.artist, 'Artiste inconnu');
+        const count = Number.isFinite(Number(item.count)) ? Number(item.count) : 0;
+        return `${name} (${count}x)`;
+      })
+      .join(', ');
+    lines.push(`Top artistes joués: ${artists}`);
+  }
+
+  const ignoredArtists = Array.isArray(src.ignored_artists) ? src.ignored_artists : [];
+  if (ignoredArtists.length > 0) {
+    const artists = ignoredArtists
+      .slice(0, 5)
+      .map((row) => asText(asRecord(row).artist, 'Artiste inconnu'))
+      .join(', ');
+    lines.push(`Artistes souvent ignorés: ${artists}`);
+  }
+
+  if (Number.isFinite(Number(src.play_ratio_pct))) {
+    lines.push(`Taux de suggestions jouées: ${Number(src.play_ratio_pct)}%`);
+  }
+
+  return lines.length ? lines.join('\n') : 'Profil DJ présent mais sans données utiles';
 }
 
-function toChronologicalTracks(value: unknown): TrackLike[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      const row = asRecord(item);
-      return {
-        spotify_track_id: asText(row.spotify_track_id ?? ''),
-        title: asText(row.title ?? ''),
-        artist: asText(row.artist ?? ''),
-        played_at: asText(row.played_at ?? ''),
-      };
-    })
-    .filter((item) => item.title || item.artist)
-    .slice(-10);
-}
+function buildPrompt(payload: AutoDJPayload): string {
+  const directionText = payload.dj_context.direction === 'down'
+    ? 'DESCENDRE la tension'
+    : 'MONTER la tension';
 
-function toRequests(value: unknown): RequestLike[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      const row = asRecord(item);
-      return {
-        title: asText(row.title ?? ''),
-        artist: asText(row.artist ?? ''),
-        votes: Number.isFinite(Number(row.votes)) ? Number(row.votes) : null,
-      };
-    })
-    .filter((item) => item.title || item.artist)
-    .slice(0, 25);
-}
-
-function buildUserPrompt(payload: {
-  now_playing: TrackLike | null;
-  recent_tracks: TrackLike[];
-  requests: RequestLike[];
-  dj_context: { direction: 'up' | 'down' };
-  dj_profile?: DJProfile | null;
-}) {
-  const directionSentence = payload.dj_context.direction === 'down'
-    ? 'Le DJ veut actuellement DESCENDRE la tension.'
-    : 'Le DJ veut actuellement MONTER la tension.';
+  const nowPlayingText = payload.now_playing
+    ? `${payload.now_playing.title || 'Titre inconnu'} — ${payload.now_playing.artist || 'Artiste inconnu'}`
+    : 'Aucun morceau en cours';
 
   const recentTracksText = payload.recent_tracks.length
     ? payload.recent_tracks
-      .map((track, index, array) => {
-        const position = index === array.length - 1 ? '← le plus récent' : '';
-        return `${index + 1}. ${track.title || 'Titre inconnu'} — ${track.artist || 'Artiste inconnu'}${track.played_at ? ` (${track.played_at})` : ''} ${position}`.trim();
-      })
+      .map((track, idx) => `${idx + 1}. ${track.title || 'Titre inconnu'} — ${track.artist || 'Artiste inconnu'}${track.played_at ? ` (${track.played_at})` : ''}`)
       .join('\n')
-    : 'Aucun historique récent.';
+    : 'Aucun historique récent';
+
+  const recentSuggestionsText = payload.recent_suggestions.length
+    ? payload.recent_suggestions
+      .map((s) => `${s.title || 'Titre inconnu'} — ${s.artist || 'Artiste inconnu'} | role=${s.role_hint || s.role || 'unknown'} | played=${s.was_played ? 'yes' : 'no'}`)
+      .join('\n')
+    : 'Aucune suggestion récente';
 
   const requestsText = payload.requests.length
     ? payload.requests
-      .map((request) => `- ${request.title || 'Titre inconnu'} — ${request.artist || 'Artiste inconnu'}${request.votes ? ` (${request.votes} votes)` : ''}`)
+      .map((r) => `${r.title || 'Titre inconnu'} — ${r.artist || 'Artiste inconnu'} (${r.votes ?? 0} votes)`)
       .join('\n')
-    : 'Aucune demande en attente.';
+    : 'Aucune demande publique';
 
   const djProfileText = buildDjProfileSection(payload.dj_profile);
 
   return [
-    directionSentence,
+    'Tu es Auto-DJ V3. Réponds uniquement en JSON valide.',
     '',
-    'Analyse la liste recent_tracks comme une trajectoire musicale chronologique du plus ancien au plus récent.',
-    'Le dernier morceau et les 3 à 5 derniers titres ont plus de poids que les plus anciens.',
-    'Reste cohérent avec le style actuel, évite les ruptures brutales et prends en compte les demandes seulement si elles collent au style, à la direction et à la trajectoire.',
+    `Direction DJ: ${payload.dj_context.direction} (${directionText}).`,
     '',
-    'Règles directionnelles :',
-    payload.dj_context.direction === 'down'
-      ? '- SAFE: transition douce, énergie descendante.\n- BUILD: transition structurée mais orientée vers une baisse d'intensité.\n- BOLD: choix plus audacieux pour redescendre ou changer doucement de registre.'
-      : '- SAFE: continuité très naturelle.\n- BUILD: monte légèrement l'énergie.\n- BOLD: monte davantage ou fait évoluer le style tout en restant cohérent.',
+    'Objectif:',
+    '- Analyser les derniers morceaux comme une trajectoire musicale.',
+    '- Donner plus de poids aux 3-5 derniers morceaux.',
+    '- Respecter strictement la direction up/down demandée.',
+    '- Éviter les morceaux récemment joués.',
+    '- Pénaliser les suggestions déjà ignorées récemment.',
+    '- Varier les artistes (éviter les doublons artiste).',
+    '- Prendre en compte les demandes publiques si elles restent cohérentes avec style/trajectoire/direction.',
+    '- Générer environ 15 candidats diversifiés.',
     '',
-    `Now playing: ${payload.now_playing?.title || 'Inconnu'} — ${payload.now_playing?.artist || 'Inconnu'}`,
+    `Now playing: ${nowPlayingText}`,
     '',
-    'Recent tracks (ordre chronologique, le dernier est le plus récent) :',
+    'Recent tracks (ordre chronologique ancien -> récent):',
     recentTracksText,
     '',
-    'Demandes en attente :',
-    requestsText,
-    ...(djProfileText ? ['', djProfileText] : []),
+    'Recent suggestions (incluant ignorées):',
+    recentSuggestionsText,
     '',
-    'Réponds uniquement en JSON avec ce format exact :',
-    '{"suggestions":[{"title":"...","artist":"...","reason":"...","role":"safe|build|bold","estimated_tension":0}]}',
-    'Il faut exactement 3 suggestions: SAFE, BUILD, BOLD.',
-    'Ne mets aucun texte hors JSON.',
+    'Public requests:',
+    requestsText,
+    '',
+    `DJ profile: ${djProfileText}`,
+    '',
+    'Format de sortie OBLIGATOIRE:',
+    '{',
+    '  "analysis": {',
+    '    "current_style": "string",',
+    '    "trajectory": "string",',
+    '    "energy_estimate": 0-100 integer,',
+    `    "direction": "${payload.dj_context.direction}",`,
+    '    "confidence": 0-1 number',
+    '  },',
+    '  "candidates": [',
+    '    {',
+    '      "title": "string non vide",',
+    '      "artist": "string non vide",',
+    '      "reason": "string non vide",',
+    '      "role_hint": "safe|build|bold|neutral",',
+    '      "estimated_tension": 0-100 integer',
+    '    }',
+    '  ]',
+    '}',
+    '',
+    'Contraintes finales:',
+    '- candidates doit contenir entre 12 et 20 éléments (vise ~15).',
+    '- Aucun texte hors JSON.',
+    '- Ne retourne JAMAIS de clé "suggestions".',
   ].join('\n');
 }
 
-function buildDjProfileSection(profile?: DJProfile | null): string {
-  if (!profile) return '';
-  const lines: string[] = ['Profil DJ (mémoire longue soirée) :'];
-
-  if (profile.top_artists && profile.top_artists.length > 0) {
-    lines.push('Top artistes joués : ' + profile.top_artists.slice(0, 5).map((a) => `${a.artist} (${a.count}×)`).join(', '));
-  }
-  if (profile.ignored_artists && profile.ignored_artists.length > 0) {
-    lines.push('Artistes souvent ignorés (éviter) : ' + profile.ignored_artists.slice(0, 5).map((a) => a.artist).join(', '));
-  }
-  if (profile.play_ratio_pct !== null && profile.play_ratio_pct !== undefined) {
-    lines.push(`Taux de play sur suggestions : ${profile.play_ratio_pct}%`);
-  }
-
-  return lines.join('\n');
+function stripJsonFences(text: string): string {
+  return text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
 }
 
-async function fetchSuggestions(payload: {
-  now_playing: TrackLike | null;
-  recent_tracks: TrackLike[];
-  requests: RequestLike[];
-  dj_context: { direction: 'up' | 'down' };
-  dj_profile?: DJProfile | null;
-}) {
+function parseRoleHint(value: unknown): RoleHint | null {
+  const v = asText(value).toLowerCase();
+  if (v === 'safe' || v === 'build' || v === 'bold' || v === 'neutral') return v;
+  return null;
+}
+
+function parseAnalysis(raw: unknown, expectedDirection: Direction): Analysis | null {
+  const src = asRecord(raw);
+  const current_style = asText(src.current_style);
+  const trajectory = asText(src.trajectory);
+  const energy_estimate = asIntInRange(src.energy_estimate, 0, 100);
+  const direction = src.direction === 'up' || src.direction === 'down' ? src.direction : null;
+  const confidence = asNumberInRange(src.confidence, 0, 1);
+
+  if (!current_style || !trajectory || energy_estimate === null || !direction || confidence === null) return null;
+  if (direction !== expectedDirection) return null;
+
+  return {
+    current_style,
+    trajectory,
+    energy_estimate,
+    direction,
+    confidence,
+  };
+}
+
+function parseCandidate(raw: unknown): Candidate | null {
+  const src = asRecord(raw);
+  const title = asText(src.title);
+  const artist = asText(src.artist);
+  const reason = asText(src.reason);
+  const role_hint = parseRoleHint(src.role_hint);
+  const estimated_tension = asIntInRange(src.estimated_tension, 0, 100);
+
+  if (!title || !artist || !reason || !role_hint || estimated_tension === null) return null;
+
+  return {
+    title,
+    artist,
+    reason,
+    role_hint,
+    estimated_tension,
+  };
+}
+
+function validateV3Response(raw: unknown, expectedDirection: Direction): AutoDJV3Response {
+  const src = asRecord(raw);
+  const analysis = parseAnalysis(src.analysis, expectedDirection);
+  if (!analysis) {
+    throw new Error('Invalid auto-dj response: missing or invalid analysis');
+  }
+
+  if (!Array.isArray(src.candidates)) {
+    throw new Error('Invalid auto-dj response: missing candidates');
+  }
+
+  const rawCandidates = src.candidates;
+  if (rawCandidates.length < 12 || rawCandidates.length > 20) {
+    throw new Error(
+      `Invalid auto-dj response: raw candidates count out of range (12-20), raw=${rawCandidates.length}`,
+    );
+  }
+
+  const candidates: Candidate[] = [];
+  for (let i = 0; i < rawCandidates.length; i += 1) {
+    const parsed = parseCandidate(rawCandidates[i]);
+    if (!parsed) {
+      throw new Error(`Invalid auto-dj response: invalid candidate at index ${i}`);
+    }
+    candidates.push(parsed);
+  }
+
+  return { analysis, candidates };
+}
+
+async function fetchAutoDJV3(payload: AutoDJPayload): Promise<AutoDJV3Response> {
   const apiKey = Deno.env.get('OPENAI_API_KEY');
   if (!apiKey) throw new Error('OPENAI_API_KEY manquant');
 
-  const model = Deno.env.get('OPENAI_MODEL') || 'gpt-4.1-mini';
+  const model = Deno.env.get('OPENAI_MODEL') || DEFAULT_OPENAI_MODEL;
+
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -183,20 +373,16 @@ async function fetchSuggestions(payload: {
     },
     body: JSON.stringify({
       model,
-      temperature: 0.8,
+      temperature: 0.7,
       response_format: { type: 'json_object' },
       messages: [
         {
           role: 'system',
-          content: [
-            'Tu es un assistant Auto-DJ expert en trajectoires de soirée.',
-            'Tu proposes uniquement le prochain morceau, jamais de faux titre, jamais de doublon récent, jamais de texte hors JSON.',
-            'Tu utilises impérativement dj_context.direction pour décider s’il faut monter ou descendre.',
-          ].join(' '),
+          content: 'Tu es un assistant Auto-DJ expert. Tu dois toujours répondre un JSON strict au format demandé.',
         },
         {
           role: 'user',
-          content: buildUserPrompt(payload),
+          content: buildPrompt(payload),
         },
       ],
     }),
@@ -210,26 +396,17 @@ async function fetchSuggestions(payload: {
   const completion = await response.json();
   const content = completion?.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('Réponse OpenAI vide');
+    throw new Error('OpenAI: empty content');
   }
 
-  let parsed: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(content) as Record<string, unknown>;
+    parsed = JSON.parse(stripJsonFences(content));
   } catch {
-    throw new Error('Réponse OpenAI JSON invalide');
-  }
-  if (!Array.isArray(parsed?.suggestions) || parsed.suggestions.length !== 3) {
-    throw new Error('Réponse suggestions invalide');
+    throw new Error('OpenAI: invalid JSON');
   }
 
-  return parsed.suggestions.map((item: Record<string, unknown>, index: number) => ({
-    title: asText(item?.title),
-    artist: asText(item?.artist),
-    reason: asText(item?.reason),
-    role: normalizeRole(item?.role, index),
-    estimated_tension: clampTension(item?.estimated_tension),
-  })) as Suggestion[];
+  return validateV3Response(parsed, payload.dj_context.direction);
 }
 
 serve(async (req) => {
@@ -237,65 +414,57 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  try {
-    const body = asRecord(await req.json());
-    const nowPlaying = asRecord(body.now_playing);
-    const payload = {
-      now_playing: body.now_playing
-        ? {
-          spotify_track_id: asText(nowPlaying.spotify_track_id ?? ''),
-          title: asText(nowPlaying.title ?? ''),
-          artist: asText(nowPlaying.artist ?? ''),
-          played_at: null,
-        }
-        : null,
-      recent_tracks: toChronologicalTracks(body.recent_tracks),
-      requests: toRequests(body.requests),
-      dj_context: {
-        direction: normalizeDirection(asRecord(body.dj_context).direction),
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json',
       },
-      dj_profile: body.dj_profile ? (body.dj_profile as DJProfile) : null,
-    };
+    });
+  }
 
-    const suggestions = await fetchSuggestions(payload);
+  try {
+    const payload = parsePayload(await req.json());
 
-    // Build a lightweight analysis for client-side rendering
-    const recentTracks = payload.recent_tracks;
-    const lastTrack = recentTracks[recentTracks.length - 1] ?? payload.now_playing;
-    const analysis = {
-      current_style: lastTrack?.artist ? `Style autour de ${lastTrack.artist}` : 'Mixte',
-      trajectory: recentTracks.length >= 2
-        ? `${recentTracks[0]?.artist ?? '?'} → ${recentTracks[recentTracks.length - 1]?.artist ?? '?'}`
-        : (lastTrack?.artist ?? 'Inconnu'),
-      energy_estimate: 60,
-      direction: payload.dj_context.direction,
-      confidence: Math.min(0.9, 0.4 + recentTracks.length * 0.05),
-    };
+    if (!payload.now_playing || (!payload.now_playing.title && !payload.now_playing.artist)) {
+      return new Response(JSON.stringify({ error: 'Missing now_playing' }), {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
+      });
+    }
 
-    // Convert suggestions to candidates format (role → role_hint)
-    const candidates = suggestions.map((s) => ({
-      title: s.title,
-      artist: s.artist,
-      reason: s.reason,
-      role_hint: s.role as 'safe' | 'build' | 'bold',
-      estimated_tension: s.estimated_tension ?? 50,
-    }));
+    if (payload.recent_tracks.length === 0) {
+      return new Response(JSON.stringify({ error: 'recent_tracks must not be empty' }), {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
+      });
+    }
 
-    return new Response(JSON.stringify({ analysis, candidates }), {
+    const v3 = await fetchAutoDJV3(payload);
+
+    return new Response(JSON.stringify(v3), {
       headers: {
         ...corsHeaders,
         'Content-Type': 'application/json',
       },
     });
   } catch (error) {
-    return new Response(JSON.stringify({
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
-    }), {
-      status: 500,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json',
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Erreur inconnue' }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
       },
-    });
+    );
   }
 });
