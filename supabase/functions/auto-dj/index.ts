@@ -221,7 +221,7 @@ function buildPrompt(payload: AutoDJPayload): string {
   const djProfileText = buildDjProfileSection(payload.dj_profile);
 
   const instructionText = payload.dj_context.instruction
-    ? `Consigne DJ manuelle : "${payload.dj_context.instruction}"`
+    ? `CONSIGNE DIRECTE DU DJ : "${payload.dj_context.instruction}"`
     : 'Aucune consigne DJ manuelle';
 
   return [
@@ -278,7 +278,6 @@ function buildPrompt(payload: AutoDJPayload): string {
     '- candidates doit contenir entre 12 et 20 éléments (vise ~15).',
     '- Aucun texte hors JSON.',
     '- Ne retourne JAMAIS de clé "suggestions".',
-    '- Ne retourne JAMAIS de clé "role_hint".',
   ].join('\n');
 }
 
