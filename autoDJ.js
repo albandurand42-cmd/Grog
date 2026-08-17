@@ -259,37 +259,19 @@ export async function markSuggestionAsPlayed(spotifyTrackId) {
 }
 
 /**
- * Render suggestions with analysis (no role badges)
+ * Render suggestions
  */
 export function renderAutoDjSuggestions(container, response) {
   if (!container) return;
 
-  const { analysis, suggestions } = response;
+  const { suggestions } = response;
 
   if (!suggestions || suggestions.length === 0) {
     container.innerHTML = '<div class="empty-state">Aucune suggestion valide disponible.</div>';
     return;
   }
 
-  const directionArrow = analysis.direction === 'up' ? '↗' : analysis.direction === 'down' ? '↘' : '→';
-
-  // Render analysis section
-  const analysisHtml = `
-    <div class="auto-dj-analysis">
-      <p class="auto-dj-analysis-title">GROG détecte :</p>
-      <p class="auto-dj-analysis-content">
-        <strong>${escHtml(analysis.current_style)}</strong>
-        <span class="auto-dj-analysis-sep">·</span>
-        <span>${escHtml(analysis.trajectory)}</span>
-        <span class="auto-dj-analysis-sep">·</span>
-        <span>Énergie ${analysis.energy_estimate}/100</span>
-        <span class="auto-dj-analysis-sep">·</span>
-        <span>${directionArrow} ${analysis.direction === 'up' ? 'Montée' : analysis.direction === 'down' ? 'Descente' : 'Stable'}</span>
-      </p>
-    </div>
-  `;
-
-  container.innerHTML = analysisHtml;
+  container.innerHTML = '';
 
   // Render suggestions
   const suggestionsHtml = document.createElement('div');

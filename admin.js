@@ -72,13 +72,17 @@ function setAutoDjDirection(direction) {
   });
 }
 
-function applyAutoDjBodyVisibility() {
-  if (autoDjBody) {
-    autoDjBody.style.display = _autoDjEnabled ? '' : 'none';
-  }
+function updateAutoDjVisibility() {
+  if (!autoDjBody) return;
+  autoDjBody.style.display = _autoDjEnabled ? '' : 'none';
 }
 
 function scheduleAutoDjRefresh(reason = 'manual') {
+  if (!_autoDjEnabled) {
+    console.log('[AUTO-DJ] schedule blocked: disabled');
+    return;
+  }
+
   if (_autoDjTimer) {
     clearTimeout(_autoDjTimer);
     _autoDjTimer = null;
@@ -126,7 +130,7 @@ async function buildDjProfile() {
         .limit(100),
       supabase
         .from('suggestion_history')
-        .select('spotify_track_id, title, artist, role, was_played, suggested_at')
+        .select('spotify_track_id, title, artist, was_played, suggested_at')
         .order('suggested_at', { ascending: false })
         .limit(200),
     ]);
@@ -190,7 +194,10 @@ async function buildDjProfile() {
 }
 
 async function refreshAutoDjSuggestions(reason = 'manual') {
-  if (!_autoDjEnabled) return; // OFF : zéro appel OpenAI
+  if (!_autoDjEnabled) {
+    console.log('[AUTO-DJ] refresh blocked: disabled');
+    return;
+  }
   if (_autoDjLoading) {
     _pendingAutoDjReason = reason;
     if (autoDjList) autoDjList.innerHTML = '<p class="muted">Analyse en cours...</p>';
@@ -233,7 +240,7 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
 
     const { data: recentSuggestionsRaw, error: suggestErr } = await supabase
       .from('suggestion_history')
-      .select('spotify_track_id, title, artist, role, was_played')
+      .select('spotify_track_id, title, artist, was_played')
       .order('suggested_at', { ascending: false })
       .limit(30);
     if (suggestErr) console.warn('[AUTO-DJ] recent suggestions query warning:', suggestErr.message);
@@ -261,7 +268,7 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
       ...(djProfile ? { dj_profile: djProfile } : {}),
     };
 
-    console.log('[AUTO-DJ] payload', payload);
+    console.log('[AUTO-DJ] context sent:', payload.dj_context);
     const aiSuggestions = await requestAutoDjSuggestions(payload);
 
     const verified = await verifySuggestionsOnSpotify(aiSuggestions, {
@@ -291,9 +298,7 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
     if (_pendingAutoDjReason) {
       const pendingReason = _pendingAutoDjReason;
       _pendingAutoDjReason = null;
-      setTimeout(() => {
-        scheduleAutoDjRefresh(pendingReason);
-      }, 0);
+      scheduleAutoDjRefresh(pendingReason);
     }
   }
 }
@@ -643,27 +648,25 @@ if (autoDjInstructionInput) {
 // Init ON/OFF switch from persisted value
 if (autoDjEnabledSwitch) {
   autoDjEnabledSwitch.checked = _autoDjEnabled;
-  applyAutoDjBodyVisibility();
+  updateAutoDjVisibility();
   autoDjEnabledSwitch.addEventListener('change', () => {
     _autoDjEnabled = autoDjEnabledSwitch.checked;
-    localStorage.setItem('grog_auto_dj_enabled', _autoDjEnabled ? 'true' : 'false');
-    console.log('[AUTO-DJ] switch:', _autoDjEnabled ? 'ON' : 'OFF');
+    localStorage.setItem(
+      'grog_auto_dj_enabled',
+      _autoDjEnabled ? 'true' : 'false'
+    );
+    updateAutoDjVisibility();
 
     if (!_autoDjEnabled) {
-      // Cancel pending timers immediately
       if (_autoDjTimer) {
         clearTimeout(_autoDjTimer);
         _autoDjTimer = null;
       }
       _pendingAutoDjReason = null;
+      return;
     }
 
-    applyAutoDjBodyVisibility();
-
-    if (_autoDjEnabled) {
-      // Single initial generation on re-enable
-      scheduleAutoDjRefresh('enabled');
-    }
+    refreshAutoDjSuggestions('enabled');
   });
 }
 
@@ -688,7 +691,7 @@ if (btnApplyInstruction) {
     localStorage.setItem('grog_auto_dj_instruction', _autoDjInstruction);
     console.log('[AUTO-DJ] instruction applied:', _autoDjInstruction);
     if (_autoDjEnabled) {
-      scheduleAutoDjRefresh('instruction_apply');
+      refreshAutoDjSuggestions('instruction_apply');
     }
   });
 }
@@ -696,11 +699,10 @@ if (btnApplyInstruction) {
 if (btnClearInstruction) {
   btnClearInstruction.addEventListener('click', () => {
     _autoDjInstruction = '';
-    localStorage.setItem('grog_auto_dj_instruction', '');
     if (autoDjInstructionInput) autoDjInstructionInput.value = '';
-    console.log('[AUTO-DJ] instruction cleared');
+    localStorage.removeItem('grog_auto_dj_instruction');
     if (_autoDjEnabled) {
-      scheduleAutoDjRefresh('instruction_clear');
+      refreshAutoDjSuggestions('instruction_clear');
     }
   });
 }
