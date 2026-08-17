@@ -8,7 +8,6 @@ const corsHeaders = {
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 
 type Direction = 'up' | 'down';
-type RoleHint = 'safe' | 'build' | 'bold' | 'neutral';
 
 type TrackLike = {
   spotify_track_id?: string | null;
@@ -26,8 +25,6 @@ type RequestLike = {
 type RecentSuggestionLike = {
   title?: string | null;
   artist?: string | null;
-  role?: string | null;
-  role_hint?: string | null;
   was_played?: boolean | null;
 };
 
@@ -38,7 +35,7 @@ type AutoDJPayload = {
   recent_tracks: TrackLike[];
   recent_suggestions: RecentSuggestionLike[];
   requests: RequestLike[];
-  dj_context: { direction: Direction };
+  dj_context: { direction: Direction; instruction: string };
   dj_profile: DJProfile | null;
 };
 
@@ -54,7 +51,6 @@ type Candidate = {
   title: string;
   artist: string;
   reason: string;
-  role_hint: RoleHint;
   estimated_tension: number;
 };
 
@@ -124,8 +120,6 @@ function parsePayload(body: unknown): AutoDJPayload {
         return {
           title: asText(item.title ?? ''),
           artist: asText(item.artist ?? ''),
-          role: asText(item.role ?? ''),
-          role_hint: asText(item.role_hint ?? ''),
           was_played: Boolean(item.was_played),
         };
       })
@@ -154,6 +148,7 @@ function parsePayload(body: unknown): AutoDJPayload {
     requests,
     dj_context: {
       direction: normalizeDirection(asRecord(root.dj_context).direction),
+      instruction: asText(asRecord(root.dj_context).instruction ?? ''),
     },
     dj_profile: root.dj_profile && typeof root.dj_profile === 'object'
       ? (root.dj_profile as DJProfile)
@@ -213,7 +208,7 @@ function buildPrompt(payload: AutoDJPayload): string {
 
   const recentSuggestionsText = payload.recent_suggestions.length
     ? payload.recent_suggestions
-      .map((s) => `${s.title || 'Titre inconnu'} — ${s.artist || 'Artiste inconnu'} | role=${s.role_hint || s.role || 'unknown'} | played=${s.was_played ? 'yes' : 'no'}`)
+      .map((s) => `${s.title || 'Titre inconnu'} — ${s.artist || 'Artiste inconnu'} | played=${s.was_played ? 'yes' : 'no'}`)
       .join('\n')
     : 'Aucune suggestion récente';
 
@@ -225,19 +220,26 @@ function buildPrompt(payload: AutoDJPayload): string {
 
   const djProfileText = buildDjProfileSection(payload.dj_profile);
 
+  const instructionText = payload.dj_context.instruction
+    ? `Consigne DJ manuelle : "${payload.dj_context.instruction}"`
+    : 'Aucune consigne DJ manuelle';
+
   return [
     'Tu es Auto-DJ V3. Réponds uniquement en JSON valide.',
     '',
     `Direction DJ: ${payload.dj_context.direction} (${directionText}).`,
     '',
-    'Objectif:',
-    '- Analyser les derniers morceaux comme une trajectoire musicale.',
-    '- Donner plus de poids aux 3-5 derniers morceaux.',
-    '- Respecter strictement la direction up/down demandée.',
+    `${instructionText}`,
+    '',
+    'Objectif (par ordre de priorité):',
+    '1. Respecter les morceaux réellement joués récemment comme trajectoire principale.',
+    '2. Respecter la direction up/down demandée.',
+    '3. Appliquer la consigne DJ manuelle en construisant une transition cohérente (ne pas ignorer le contexte réel).',
+    '4. Prendre en compte les demandes publiques si cohérentes avec style/trajectoire/direction.',
+    '5. Utiliser le profil historique du DJ.',
+    '6. Pénaliser les suggestions déjà ignorées récemment.',
     '- Éviter les morceaux récemment joués.',
-    '- Pénaliser les suggestions déjà ignorées récemment.',
     '- Varier les artistes (éviter les doublons artiste).',
-    '- Prendre en compte les demandes publiques si elles restent cohérentes avec style/trajectoire/direction.',
     '- Générer environ 15 candidats diversifiés.',
     '',
     `Now playing: ${nowPlayingText}`,
@@ -267,7 +269,6 @@ function buildPrompt(payload: AutoDJPayload): string {
     '      "title": "string non vide",',
     '      "artist": "string non vide",',
     '      "reason": "string non vide",',
-    '      "role_hint": "safe|build|bold|neutral",',
     '      "estimated_tension": 0-100 integer',
     '    }',
     '  ]',
@@ -277,17 +278,12 @@ function buildPrompt(payload: AutoDJPayload): string {
     '- candidates doit contenir entre 12 et 20 éléments (vise ~15).',
     '- Aucun texte hors JSON.',
     '- Ne retourne JAMAIS de clé "suggestions".',
+    '- Ne retourne JAMAIS de clé "role_hint".',
   ].join('\n');
 }
 
 function stripJsonFences(text: string): string {
   return text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-}
-
-function parseRoleHint(value: unknown): RoleHint | null {
-  const v = asText(value).toLowerCase();
-  if (v === 'safe' || v === 'build' || v === 'bold' || v === 'neutral') return v;
-  return null;
 }
 
 function parseAnalysis(raw: unknown, expectedDirection: Direction): Analysis | null {
@@ -315,16 +311,14 @@ function parseCandidate(raw: unknown): Candidate | null {
   const title = asText(src.title);
   const artist = asText(src.artist);
   const reason = asText(src.reason);
-  const role_hint = parseRoleHint(src.role_hint);
   const estimated_tension = asIntInRange(src.estimated_tension, 0, 100);
 
-  if (!title || !artist || !reason || !role_hint || estimated_tension === null) return null;
+  if (!title || !artist || !reason || estimated_tension === null) return null;
 
   return {
     title,
     artist,
     reason,
-    role_hint,
     estimated_tension,
   };
 }

@@ -20,12 +20,12 @@ interface Request {
 interface RecentSuggestion {
   title: string;
   artist: string;
-  role: string;
   was_played: boolean;
 }
 
 interface DJContext {
   direction: "up" | "down";
+  instruction: string;
 }
 
 interface Payload {
@@ -52,7 +52,6 @@ interface Candidate {
   title: string;
   artist: string;
   reason: string;
-  role_hint: "safe" | "build" | "bold" | "neutral";
   estimated_tension: number;
 }
 
@@ -217,7 +216,7 @@ async function generateCandidatesWithAI(
           .slice(0, 20)
           .map(
             (s) =>
-              `${s.title} - ${s.artist} (${s.role}) [played: ${s.was_played}]`
+              `${s.title} - ${s.artist} [played: ${s.was_played}]`
           )
           .join("\n")
       : "None";
@@ -229,6 +228,10 @@ async function generateCandidatesWithAI(
           .map((r) => `${r.title} - ${r.artist} (${r.votes} votes)`)
           .join("\n")
       : "None";
+
+  const instructionText = payload.dj_context.instruction
+    ? `DJ MANUAL INSTRUCTION: "${payload.dj_context.instruction}" (build a coherent transition, don't ignore the real context)`
+    : "";
 
   const prompt = `You are an expert DJ AI assistant analyzing music trends for Auto-DJ V3.
 
@@ -252,20 +255,22 @@ PUBLIC REQUESTS (pending):
 ${requestsInfo}
 
 DJ DIRECTION PREFERENCE: ${payload.dj_context.direction === "up" ? "ASCENDING (increase energy/intensity)" : "DESCENDING (reduce energy/intensity)"}
+${instructionText}
 
 YOUR TASK:
-Generate exactly 15 candidate tracks that would work well as the next suggestion. 
+Generate exactly 15 candidate tracks that would work well as the next suggestion.
+
+Priority order:
+1. Recent tracks played (real context)
+2. DJ direction up/down
+3. DJ manual instruction (coherent transition)
+4. Public requests (if consistent)
 
 For each candidate, provide:
 1. title: exact track title
 2. artist: artist name
 3. reason: brief explanation why this works (max 2 sentences)
-4. role_hint: one of [safe, build, bold, neutral]
-   - safe: natural progression, low risk
-   - build: moves toward the DJ direction
-   - bold: more experimental/daring but musicologically sound
-   - neutral: fits well but doesn't progress
-5. estimated_tension: 0-100 scale (0=calm, 100=intense)
+4. estimated_tension: 0-100 scale (0=calm, 100=intense)
 
 CONSTRAINTS:
 - Avoid the currently playing track
@@ -284,7 +289,6 @@ Format:
     "title": "...",
     "artist": "...",
     "reason": "...",
-    "role_hint": "safe|build|bold|neutral",
     "estimated_tension": 75
   },
   ...

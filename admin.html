@@ -33,7 +33,6 @@
   <div class="auto-dj-header">
     <div>
       <h2 id="auto-dj-title">🤖 AUTO-DJ</h2>
-      <p class="muted">Suggestions pour le prochain morceau</p>
     </div>
 
     <div class="auto-dj-header-actions">
@@ -44,6 +43,43 @@
           <span class="auto-dj-toggle-slider"></span>
         </div>
       </label>
+    </div>
+  </div>
+
+  <div id="auto-dj-body">
+    <!-- Contrôle de la soirée -->
+    <div class="auto-dj-controls">
+      <div class="auto-dj-direction-wrap">
+        <span class="auto-dj-control-label">Direction</span>
+        <div class="auto-dj-direction-buttons">
+          <button type="button" id="btn-dir-up" class="auto-dj-dir-btn active" data-dir="up">↗ MONTER</button>
+          <button type="button" id="btn-dir-down" class="auto-dj-dir-btn" data-dir="down">↘ DESCENDRE</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Consigne DJ -->
+    <div class="auto-dj-instruction-wrap">
+      <span class="auto-dj-control-label">Consigne DJ</span>
+      <textarea
+        id="auto-dj-instruction"
+        class="auto-dj-instruction-textarea"
+        placeholder="Ex : va vers de la house moderne, évite les classiques, monte doucement..."
+        rows="2"
+      ></textarea>
+      <div class="auto-dj-instruction-actions">
+        <button type="button" id="auto-dj-apply-instruction" class="secondary">Appliquer</button>
+        <button type="button" id="auto-dj-clear-instruction" class="secondary">Effacer</button>
+      </div>
+    </div>
+
+    <div id="auto-dj-list" class="auto-dj-list">
+      <div class="empty-state">
+        Les suggestions apparaîtront ici.
+      </div>
+    </div>
+
+    <div class="auto-dj-footer-actions">
       <button
         id="btn-auto-dj-refresh"
         type="button"
@@ -51,23 +87,6 @@
       >
         ↻ Nouvelles suggestions
       </button>
-    </div>
-  </div>
-
-  <!-- Contrôle de la soirée -->
-  <div class="auto-dj-controls">
-    <div class="auto-dj-direction-wrap">
-      <span class="auto-dj-control-label">Direction</span>
-      <div class="auto-dj-direction-buttons">
-        <button type="button" id="btn-dir-up" class="auto-dj-dir-btn active" data-dir="up">↗ MONTER</button>
-        <button type="button" id="btn-dir-down" class="auto-dj-dir-btn" data-dir="down">↘ DESCENDRE</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="auto-dj-list" class="auto-dj-list">
-    <div class="empty-state">
-      Les suggestions apparaîtront ici.
     </div>
   </div>
 
