@@ -27,13 +27,15 @@ export async function requestAutoDjSuggestions(payload) {
     throw new Error(`auto-dj HTTP ${res.status} ${txt}`);
   }
 
-  const json = await res.json();
-  if (!json || !json.analysis || !Array.isArray(json.candidates)) {
+  const data = await res.json();
+  console.log('[AUTO-DJ] edge response', data);
+
+  if (!data || !data.analysis || !Array.isArray(data.candidates)) {
     throw new Error('Invalid auto-dj response: missing analysis or candidates');
   }
 
   // Validate candidates
-  const candidates = json.candidates.map((c) => ({
+  const candidates = data.candidates.map((c) => ({
     title: String(c?.title ?? '').trim(),
     artist: String(c?.artist ?? '').trim(),
     reason: String(c?.reason ?? '').trim(),
@@ -44,7 +46,7 @@ export async function requestAutoDjSuggestions(payload) {
   }));
 
   return {
-    analysis: json.analysis,
+    analysis: data.analysis,
     candidates,
   };
 }
