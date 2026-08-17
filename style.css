@@ -22,6 +22,76 @@
   gap: 12px;
 }
 
+.auto-dj-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ON/OFF Toggle */
+.auto-dj-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.auto-dj-toggle-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.auto-dj-toggle-track {
+  position: relative;
+  width: 44px;
+  height: 24px;
+}
+
+.auto-dj-toggle-track input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.auto-dj-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: background 0.2s, border-color 0.2s;
+  pointer-events: none;
+}
+
+.auto-dj-toggle-slider::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.2s, background 0.2s;
+}
+
+.auto-dj-toggle-track input:checked + .auto-dj-toggle-slider {
+  background: rgba(124, 92, 255, 0.3);
+  border-color: var(--accent);
+}
+
+.auto-dj-toggle-track input:checked + .auto-dj-toggle-slider::before {
+  transform: translateX(20px) translateY(-50%);
+  background: var(--accent);
+}
+
 .auto-dj-controls {
   display: grid;
   gap: 12px;

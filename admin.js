@@ -6,7 +6,7 @@ import { fetchPendingRequests, subscribeToQueue } from './queue.js';
 import { supabase } from './supabase.js';
 import { escHtml } from './utils.js';
 import { fetchVolumeScore } from './votes.js';
-import { requestAutoDjSuggestions, verifySuggestionsOnSpotify, renderAutoDjSuggestions } from './autoDJ.js';
+import { requestAutoDjSuggestions, verifySuggestionsOnSpotify, renderAutoDjSuggestions, recordSuggestionsToHistory, markSuggestionAsPlayed } from './autoDJ.js';
 
 // ----- Sélecteurs DOM -----
 const authStatus = document.getElementById('auth-status');
@@ -24,8 +24,10 @@ const syncStatus = document.getElementById('sync-status');
 const autoDjList = document.getElementById('auto-dj-list');
 const btnAutoDjRefresh = document.getElementById('btn-auto-dj-refresh');
 const autoDjDirBtns = document.querySelectorAll('.auto-dj-dir-btn');
+const autoDjEnabledSwitch = document.getElementById('auto-dj-enabled');
 
 let _autoDjDirection = document.querySelector('.auto-dj-dir-btn.active')?.dataset?.dir ?? 'up';
+let _autoDjEnabled = localStorage.getItem('grog_auto_dj_enabled') !== 'false';
 
 let _lastHistoryTrackId = null;
 let _lastAutoDjTrackId = null;
@@ -103,6 +105,79 @@ async function loadCurrentUser() {
   }
 }
 
+async function buildDjProfile() {
+  try {
+    const [historyResult, suggestionsResult] = await Promise.all([
+      supabase
+        .from('play_history')
+        .select('spotify_track_id, title, artist, played_at')
+        .order('played_at', { ascending: false })
+        .limit(100),
+      supabase
+        .from('suggestion_history')
+        .select('spotify_track_id, title, artist, role, was_played, suggested_at')
+        .order('suggested_at', { ascending: false })
+        .limit(200),
+    ]);
+
+    const history = historyResult.data ?? [];
+    const suggestions = suggestionsResult.data ?? [];
+
+    // Top artists from play history
+    const artistPlayCount = new Map();
+    for (const t of history) {
+      const key = String(t.artist ?? '').trim();
+      if (key) artistPlayCount.set(key, (artistPlayCount.get(key) || 0) + 1);
+    }
+    const topArtists = [...artistPlayCount.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([artist, count]) => ({ artist, count }));
+
+    // Top tracks from play history
+    const trackPlayCount = new Map();
+    for (const t of history) {
+      const key = `${String(t.title ?? '').trim()}::${String(t.artist ?? '').trim()}`;
+      if (key !== '::') trackPlayCount.set(key, { title: t.title, artist: t.artist, count: (trackPlayCount.get(key)?.count || 0) + 1 });
+    }
+    const topTracks = [...trackPlayCount.values()]
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    // Ignored artists: suggested but never played
+    const artistSuggested = new Map();
+    const artistPlayed = new Map();
+    for (const s of suggestions) {
+      const key = String(s.artist ?? '').trim();
+      if (!key) continue;
+      artistSuggested.set(key, (artistSuggested.get(key) || 0) + 1);
+      if (s.was_played) artistPlayed.set(key, (artistPlayed.get(key) || 0) + 1);
+    }
+    const ignoredArtists = [...artistSuggested.entries()]
+      .filter(([artist]) => !(artistPlayed.get(artist) > 0))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([artist, ignored]) => ({ artist, ignored }));
+
+    // Overall ratio
+    const totalSuggested = suggestions.length;
+    const totalPlayed = suggestions.filter((s) => s.was_played).length;
+    const playRatio = totalSuggested > 0 ? Math.round((totalPlayed / totalSuggested) * 100) : null;
+
+    return {
+      top_artists: topArtists,
+      top_tracks: topTracks,
+      ignored_artists: ignoredArtists,
+      total_suggestions: totalSuggested,
+      total_played: totalPlayed,
+      play_ratio_pct: playRatio,
+    };
+  } catch (err) {
+    console.warn('[AUTO-DJ] buildDjProfile error:', err?.message ?? String(err));
+    return null;
+  }
+}
+
 async function refreshAutoDjSuggestions(reason = 'manual') {
   if (_autoDjLoading) return;
   _autoDjLoading = true;
@@ -140,6 +215,16 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
       votes: Number(r.request_count ?? 1),
     }));
 
+    const { data: recentSuggestionsRaw, error: suggestErr } = await supabase
+      .from('suggestion_history')
+      .select('spotify_track_id, title, artist, role, was_played')
+      .order('suggested_at', { ascending: false })
+      .limit(30);
+    if (suggestErr) console.warn('[AUTO-DJ] recent suggestions query warning:', suggestErr.message);
+    const recentSuggestions = recentSuggestionsRaw ?? [];
+
+    const djProfile = await buildDjProfile();
+
     const payload = {
       now_playing: {
         spotify_track_id: nowPlaying?.spotify_track_id ?? '',
@@ -156,6 +241,7 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
       dj_context: {
         direction: _autoDjDirection,
       },
+      ...(djProfile ? { dj_profile: djProfile } : {}),
     };
 
     const aiSuggestions = await requestAutoDjSuggestions(payload);
@@ -164,10 +250,18 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
       nowPlaying: nowPlaying ?? null,
       recentTracks: recentTracks ?? [],
       requests,
+      recentSuggestions,
     });
 
     renderAutoDjSuggestions(autoDjList, verified);
-    console.log('[AUTO-DJ] suggestions refreshed:', reason, 'count=', verified.length);
+
+    const generationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await recordSuggestionsToHistory(verified.suggestions, generationId, {
+      direction: _autoDjDirection,
+      context_style: aiSuggestions?.analysis?.current_style ?? null,
+    });
+
+    console.log('[AUTO-DJ] suggestions refreshed:', reason, 'count=', verified.suggestions?.length ?? 0);
   } catch (err) {
     console.error('[AUTO-DJ] refresh error:', {
       reason,
@@ -213,6 +307,8 @@ function triggerAutoDjOnTrackChange(track) {
   if (_lastAutoDjTrackId === track.spotify_track_id) return; // 1 appel IA max / changement
 
   _lastAutoDjTrackId = track.spotify_track_id;
+
+  if (!_autoDjEnabled) return; // OFF : pas d'appel IA automatique
 
   if (_autoDjTimer) clearTimeout(_autoDjTimer);
   _autoDjTimer = setTimeout(() => {
@@ -337,6 +433,7 @@ if (trackChanged) {
   _lastSyncedTrackId = track.spotify_track_id;
 
   await addTrackToPlayHistoryIfNeeded(track);
+  await markSuggestionAsPlayed(track.spotify_track_id);
   triggerAutoDjOnTrackChange(track);
 }
 
@@ -517,10 +614,23 @@ async function loadVolumeScore() {
 
 init();
 setAutoDjDirection(_autoDjDirection);
+
+// Init ON/OFF switch from persisted value
+if (autoDjEnabledSwitch) {
+  autoDjEnabledSwitch.checked = _autoDjEnabled;
+  autoDjEnabledSwitch.addEventListener('change', () => {
+    _autoDjEnabled = autoDjEnabledSwitch.checked;
+    localStorage.setItem('grog_auto_dj_enabled', _autoDjEnabled ? 'true' : 'false');
+    console.log('[AUTO-DJ] switch:', _autoDjEnabled ? 'ON' : 'OFF');
+  });
+}
+
 autoDjDirBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
     setAutoDjDirection(btn.dataset.dir);
-    scheduleAutoDjRefresh(btn.dataset.dir === 'down' ? 'direction_down' : 'direction_up');
+    if (_autoDjEnabled) {
+      scheduleAutoDjRefresh(btn.dataset.dir === 'down' ? 'direction_down' : 'direction_up');
+    }
   });
 });
 if (btnAutoDjRefresh) {

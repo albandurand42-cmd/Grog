@@ -27,6 +27,15 @@ type Suggestion = {
   estimated_tension: number | null;
 };
 
+type DJProfile = {
+  top_artists?: { artist: string; count: number }[];
+  top_tracks?: { title: string; artist: string; count: number }[];
+  ignored_artists?: { artist: string; ignored: number }[];
+  total_suggestions?: number;
+  total_played?: number;
+  play_ratio_pct?: number | null;
+};
+
 function asText(value: unknown, fallback = '') {
   return typeof value === 'string' ? value.trim() : fallback;
 }
@@ -87,6 +96,7 @@ function buildUserPrompt(payload: {
   recent_tracks: TrackLike[];
   requests: RequestLike[];
   dj_context: { direction: 'up' | 'down' };
+  dj_profile?: DJProfile | null;
 }) {
   const directionSentence = payload.dj_context.direction === 'down'
     ? 'Le DJ veut actuellement DESCENDRE la tension.'
@@ -107,6 +117,8 @@ function buildUserPrompt(payload: {
       .join('\n')
     : 'Aucune demande en attente.';
 
+  const djProfileText = buildDjProfileSection(payload.dj_profile);
+
   return [
     directionSentence,
     '',
@@ -116,8 +128,8 @@ function buildUserPrompt(payload: {
     '',
     'Règles directionnelles :',
     payload.dj_context.direction === 'down'
-      ? '- SAFE: transition douce, énergie descendante.\n- BUILD: transition structurée mais orientée vers une baisse d’intensité.\n- BOLD: choix plus audacieux pour redescendre ou changer doucement de registre.'
-      : '- SAFE: continuité très naturelle.\n- BUILD: monte légèrement l’énergie.\n- BOLD: monte davantage ou fait évoluer le style tout en restant cohérent.',
+      ? '- SAFE: transition douce, énergie descendante.\n- BUILD: transition structurée mais orientée vers une baisse d'intensité.\n- BOLD: choix plus audacieux pour redescendre ou changer doucement de registre.'
+      : '- SAFE: continuité très naturelle.\n- BUILD: monte légèrement l'énergie.\n- BOLD: monte davantage ou fait évoluer le style tout en restant cohérent.',
     '',
     `Now playing: ${payload.now_playing?.title || 'Inconnu'} — ${payload.now_playing?.artist || 'Inconnu'}`,
     '',
@@ -126,6 +138,7 @@ function buildUserPrompt(payload: {
     '',
     'Demandes en attente :',
     requestsText,
+    ...(djProfileText ? ['', djProfileText] : []),
     '',
     'Réponds uniquement en JSON avec ce format exact :',
     '{"suggestions":[{"title":"...","artist":"...","reason":"...","role":"safe|build|bold","estimated_tension":0}]}',
@@ -134,11 +147,29 @@ function buildUserPrompt(payload: {
   ].join('\n');
 }
 
+function buildDjProfileSection(profile?: DJProfile | null): string {
+  if (!profile) return '';
+  const lines: string[] = ['Profil DJ (mémoire longue soirée) :'];
+
+  if (profile.top_artists && profile.top_artists.length > 0) {
+    lines.push('Top artistes joués : ' + profile.top_artists.slice(0, 5).map((a) => `${a.artist} (${a.count}×)`).join(', '));
+  }
+  if (profile.ignored_artists && profile.ignored_artists.length > 0) {
+    lines.push('Artistes souvent ignorés (éviter) : ' + profile.ignored_artists.slice(0, 5).map((a) => a.artist).join(', '));
+  }
+  if (profile.play_ratio_pct !== null && profile.play_ratio_pct !== undefined) {
+    lines.push(`Taux de play sur suggestions : ${profile.play_ratio_pct}%`);
+  }
+
+  return lines.join('\n');
+}
+
 async function fetchSuggestions(payload: {
   now_playing: TrackLike | null;
   recent_tracks: TrackLike[];
   requests: RequestLike[];
   dj_context: { direction: 'up' | 'down' };
+  dj_profile?: DJProfile | null;
 }) {
   const apiKey = Deno.env.get('OPENAI_API_KEY');
   if (!apiKey) throw new Error('OPENAI_API_KEY manquant');
@@ -223,11 +254,34 @@ serve(async (req) => {
       dj_context: {
         direction: normalizeDirection(asRecord(body.dj_context).direction),
       },
+      dj_profile: body.dj_profile ? (body.dj_profile as DJProfile) : null,
     };
 
     const suggestions = await fetchSuggestions(payload);
 
-    return new Response(JSON.stringify({ suggestions }), {
+    // Build a lightweight analysis for client-side rendering
+    const recentTracks = payload.recent_tracks;
+    const lastTrack = recentTracks[recentTracks.length - 1] ?? payload.now_playing;
+    const analysis = {
+      current_style: lastTrack?.artist ? `Style autour de ${lastTrack.artist}` : 'Mixte',
+      trajectory: recentTracks.length >= 2
+        ? `${recentTracks[0]?.artist ?? '?'} → ${recentTracks[recentTracks.length - 1]?.artist ?? '?'}`
+        : (lastTrack?.artist ?? 'Inconnu'),
+      energy_estimate: 60,
+      direction: payload.dj_context.direction,
+      confidence: Math.min(0.9, 0.4 + recentTracks.length * 0.05),
+    };
+
+    // Convert suggestions to candidates format (role → role_hint)
+    const candidates = suggestions.map((s) => ({
+      title: s.title,
+      artist: s.artist,
+      reason: s.reason,
+      role_hint: s.role as 'safe' | 'build' | 'bold',
+      estimated_tension: s.estimated_tension ?? 50,
+    }));
+
+    return new Response(JSON.stringify({ analysis, candidates }), {
       headers: {
         ...corsHeaders,
         'Content-Type': 'application/json',

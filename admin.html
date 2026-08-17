@@ -36,13 +36,22 @@
       <p class="muted">Suggestions pour le prochain morceau</p>
     </div>
 
-    <button
-      id="btn-auto-dj-refresh"
-      type="button"
-      class="secondary"
-    >
-      ↻ Nouvelles suggestions
-    </button>
+    <div class="auto-dj-header-actions">
+      <label class="auto-dj-toggle" title="Activer/désactiver les suggestions automatiques">
+        <span class="auto-dj-toggle-label">Auto</span>
+        <div class="auto-dj-toggle-track">
+          <input type="checkbox" id="auto-dj-enabled" checked>
+          <span class="auto-dj-toggle-slider"></span>
+        </div>
+      </label>
+      <button
+        id="btn-auto-dj-refresh"
+        type="button"
+        class="secondary"
+      >
+        ↻ Nouvelles suggestions
+      </button>
+    </div>
   </div>
 
   <!-- Contrôle de la soirée -->
@@ -107,11 +116,6 @@
         <p class="muted">Score actuel : <strong id="vol-score-admin">0</strong></p>
       </section>
 
-      <!-- Auto-DJ -->
-      <section class="card" aria-labelledby="autodj-title">
-        <h2 id="autodj-title">Auto-DJ</h2>
-        <p class="muted">Le module <code>autoDJ.js</code> sera ajouté progressivement.</p>
-      </section>
     </main>
 
     <script type="module" src="admin.js"></script>
