@@ -44,9 +44,11 @@ function getInstructionHintTokens(instruction) {
   }
   if (/\bpop\b/.test(text)) hints.push('pop');
   if (/\bhouse\b/.test(text)) hints.push('house');
-  if (/\bsombre|dark\b/.test(text)) hints.push('dark', 'sombre');
-  if (/\brecent|nouveau|nouvelle\b/.test(text)) hints.push('202', '201');
-  if (/\bclassique|classic\b/.test(text)) hints.push('classic', 'classique');
+  if (/\b(sombre|dark)\b/.test(text)) hints.push('dark', 'sombre');
+  if (/\b(recent|recente|recents|recentes|nouveau|nouvelle)\b/.test(text)) {
+    hints.push('2026', '2025', '2024', '2023', '2022', '2021', '2020');
+  }
+  if (/\b(classique|classic)\b/.test(text)) hints.push('classic', 'classique');
 
   return hints;
 }

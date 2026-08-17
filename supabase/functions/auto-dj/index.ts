@@ -241,6 +241,7 @@ function buildPrompt(payload: AutoDJPayload): string {
     "Il est INTERDIT de continuer simplement à proposer de la Pop sous prétexte que les morceaux précédents sont Pop.",
     'Au moins 80% des candidats générés doivent correspondre directement à la consigne DJ.',
     "Si la consigne demande explicitement un genre, une époque, un artiste, une ambiance ou un niveau de popularité, respecter ce critère en priorité.",
+    "Quand une consigne est présente, `analysis.target_style` doit refléter la consigne DJ et `analysis.trajectory` doit expliciter la transition `current_style -> target_style`.",
     '',
     'Objectif (par ordre de priorité):',
     ...(hasInstruction
@@ -313,13 +314,13 @@ function stripJsonFences(text: string): string {
 function parseAnalysis(raw: unknown, expectedDirection: Direction): Analysis | null {
   const src = asRecord(raw);
   const current_style = asText(src.current_style);
-  const target_style = asText(src.target_style);
+  const target_style = asText(src.target_style) || current_style;
   const trajectory = asText(src.trajectory);
   const energy_estimate = asIntInRange(src.energy_estimate, 0, 100);
   const direction = src.direction === 'up' || src.direction === 'down' ? src.direction : null;
   const confidence = asNumberInRange(src.confidence, 0, 1);
 
-  if (!current_style || !target_style || !trajectory || energy_estimate === null || !direction || confidence === null) return null;
+  if (!current_style || !trajectory || energy_estimate === null || !direction || confidence === null) return null;
   if (direction !== expectedDirection) return null;
 
   return {
