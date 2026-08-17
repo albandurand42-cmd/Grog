@@ -22,7 +22,6 @@
   gap: 12px;
 }
 
-/* Controls: tension + direction */
 .auto-dj-controls {
   display: grid;
   gap: 12px;
@@ -40,22 +39,6 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-
-.auto-dj-tension-wrap {
-  display: grid;
-  gap: 4px;
-}
-
-.auto-dj-tension-bar {
-  width: 100%;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.auto-dj-tension-display {
-  font-size: 0.85rem;
-  color: var(--text);
 }
 
 .auto-dj-direction-wrap {
