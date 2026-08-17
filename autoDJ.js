@@ -39,7 +39,6 @@ export async function requestAutoDjSuggestions(payload) {
     title: String(c?.title ?? '').trim(),
     artist: String(c?.artist ?? '').trim(),
     reason: String(c?.reason ?? '').trim(),
-    role_hint: String(c?.role_hint ?? 'neutral').trim().toLowerCase(),
     estimated_tension: Number.isFinite(Number(c?.estimated_tension))
       ? Number(c.estimated_tension)
       : 50,
@@ -94,7 +93,6 @@ export async function verifySuggestionsOnSpotify(
       title: r.title,
       artist: r.artist,
       reason: r.votes > 1 ? `Demande très votée (${r.votes} votes)` : 'Demande invitée',
-      role_hint: 'neutral',
       estimated_tension: 50,
       source: 'request',
     })),
@@ -103,7 +101,6 @@ export async function verifySuggestionsOnSpotify(
   const usedIds = new Set();
   const usedKeys = new Set();
   const usedArtists = new Set();
-  const roleCount = { safe: 0, build: 0, bold: 0 };
 
   const verified = [];
 
@@ -163,18 +160,9 @@ export async function verifySuggestionsOnSpotify(
     const key = titleArtistKey(picked.title, picked.artist);
     const artistKey = norm(picked.artist);
 
-    // Assign role: prefer diversification
-    let role = c.role_hint;
-    if (role === 'neutral' || !['safe', 'build', 'bold'].includes(role)) {
-      // Auto-assign to underrepresented role
-      const sorted = Object.entries(roleCount).sort(([, a], [, b]) => a - b);
-      role = sorted[0][0];
-    }
-
     usedIds.add(picked.id);
     usedKeys.add(key);
     usedArtists.add(artistKey);
-    roleCount[role]++;
 
     verified.push({
       spotify_track_id: picked.id,
@@ -184,7 +172,6 @@ export async function verifySuggestionsOnSpotify(
       uri: picked.uri ?? null,
       external_url: picked.id ? `https://open.spotify.com/track/${encodeURIComponent(picked.id)}` : null,
       reason: c.reason,
-      role,
       estimated_tension: c.estimated_tension ?? 50,
     });
 
@@ -212,7 +199,6 @@ export async function recordSuggestionsToHistory(suggestions, generationId, cont
       spotify_track_id: s.spotify_track_id,
       title: s.title,
       artist: s.artist,
-      role: s.role || 'neutral',
       suggested_at: new Date().toISOString(),
       was_played: false,
       generation_id: generationId,
@@ -273,7 +259,7 @@ export async function markSuggestionAsPlayed(spotifyTrackId) {
 }
 
 /**
- * Render suggestions with analysis and role-based diversification
+ * Render suggestions with analysis (no role badges)
  */
 export function renderAutoDjSuggestions(container, response) {
   if (!container) return;
@@ -285,7 +271,6 @@ export function renderAutoDjSuggestions(container, response) {
     return;
   }
 
-  const roleLabels = { safe: 'SAFE', build: 'BUILD', bold: 'BOLD' };
   const directionArrow = analysis.direction === 'up' ? '↗' : analysis.direction === 'down' ? '↘' : '→';
 
   // Render analysis section
@@ -314,18 +299,12 @@ export function renderAutoDjSuggestions(container, response) {
     const item = document.createElement('article');
     item.className = 'auto-dj-suggestion';
 
-    const roleBadge =
-      s.role && roleLabels[s.role]
-        ? `<span class="auto-dj-role-badge auto-dj-role-${escHtml(s.role)}">${roleLabels[s.role]}</span>`
-        : '';
-
     const tensionHtml =
       s.estimated_tension !== null
         ? `<small class="muted auto-dj-tension-hint">Tension : ${Math.round(s.estimated_tension)}</small>`
         : '';
 
     item.innerHTML = `
-      ${roleBadge}
       ${
         s.image_url
           ? `<img class="auto-dj-cover" src="${escHtml(s.image_url)}" alt="pochette ${escHtml(s.title)}" width="56" height="56" loading="lazy">`

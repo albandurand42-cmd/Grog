@@ -25,9 +25,14 @@ const autoDjList = document.getElementById('auto-dj-list');
 const btnAutoDjRefresh = document.getElementById('btn-auto-dj-refresh');
 const autoDjDirBtns = document.querySelectorAll('.auto-dj-dir-btn');
 const autoDjEnabledSwitch = document.getElementById('auto-dj-enabled');
+const autoDjBody = document.getElementById('auto-dj-body');
+const autoDjInstructionInput = document.getElementById('auto-dj-instruction');
+const btnApplyInstruction = document.getElementById('auto-dj-apply-instruction');
+const btnClearInstruction = document.getElementById('auto-dj-clear-instruction');
 
 let _autoDjDirection = document.querySelector('.auto-dj-dir-btn.active')?.dataset?.dir ?? 'up';
 let _autoDjEnabled = localStorage.getItem('grog_auto_dj_enabled') !== 'false';
+let _autoDjInstruction = localStorage.getItem('grog_auto_dj_instruction') ?? '';
 
 let _lastHistoryTrackId = null;
 let _lastAutoDjTrackId = null;
@@ -65,6 +70,12 @@ function setAutoDjDirection(direction) {
   autoDjDirBtns.forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.dir === _autoDjDirection);
   });
+}
+
+function applyAutoDjBodyVisibility() {
+  if (autoDjBody) {
+    autoDjBody.style.display = _autoDjEnabled ? '' : 'none';
+  }
 }
 
 function scheduleAutoDjRefresh(reason = 'manual') {
@@ -179,6 +190,7 @@ async function buildDjProfile() {
 }
 
 async function refreshAutoDjSuggestions(reason = 'manual') {
+  if (!_autoDjEnabled) return; // OFF : zéro appel OpenAI
   if (_autoDjLoading) {
     _pendingAutoDjReason = reason;
     if (autoDjList) autoDjList.innerHTML = '<p class="muted">Analyse en cours...</p>';
@@ -244,6 +256,7 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
       requests,
       dj_context: {
         direction: _autoDjDirection,
+        instruction: _autoDjInstruction,
       },
       ...(djProfile ? { dj_profile: djProfile } : {}),
     };
@@ -622,13 +635,35 @@ async function loadVolumeScore() {
 init();
 setAutoDjDirection(_autoDjDirection);
 
+// Init instruction from localStorage
+if (autoDjInstructionInput) {
+  autoDjInstructionInput.value = _autoDjInstruction;
+}
+
 // Init ON/OFF switch from persisted value
 if (autoDjEnabledSwitch) {
   autoDjEnabledSwitch.checked = _autoDjEnabled;
+  applyAutoDjBodyVisibility();
   autoDjEnabledSwitch.addEventListener('change', () => {
     _autoDjEnabled = autoDjEnabledSwitch.checked;
     localStorage.setItem('grog_auto_dj_enabled', _autoDjEnabled ? 'true' : 'false');
     console.log('[AUTO-DJ] switch:', _autoDjEnabled ? 'ON' : 'OFF');
+
+    if (!_autoDjEnabled) {
+      // Cancel pending timers immediately
+      if (_autoDjTimer) {
+        clearTimeout(_autoDjTimer);
+        _autoDjTimer = null;
+      }
+      _pendingAutoDjReason = null;
+    }
+
+    applyAutoDjBodyVisibility();
+
+    if (_autoDjEnabled) {
+      // Single initial generation on re-enable
+      scheduleAutoDjRefresh('enabled');
+    }
   });
 }
 
@@ -640,7 +675,32 @@ autoDjDirBtns.forEach((btn) => {
     }
   });
 });
+
 if (btnAutoDjRefresh) {
   btnAutoDjRefresh.removeEventListener('click', handleManualAutoDjRefresh);
   btnAutoDjRefresh.addEventListener('click', handleManualAutoDjRefresh);
+}
+
+// Instruction Apply / Clear
+if (btnApplyInstruction) {
+  btnApplyInstruction.addEventListener('click', () => {
+    _autoDjInstruction = autoDjInstructionInput ? autoDjInstructionInput.value.trim() : '';
+    localStorage.setItem('grog_auto_dj_instruction', _autoDjInstruction);
+    console.log('[AUTO-DJ] instruction applied:', _autoDjInstruction);
+    if (_autoDjEnabled) {
+      scheduleAutoDjRefresh('instruction_apply');
+    }
+  });
+}
+
+if (btnClearInstruction) {
+  btnClearInstruction.addEventListener('click', () => {
+    _autoDjInstruction = '';
+    localStorage.setItem('grog_auto_dj_instruction', '');
+    if (autoDjInstructionInput) autoDjInstructionInput.value = '';
+    console.log('[AUTO-DJ] instruction cleared');
+    if (_autoDjEnabled) {
+      scheduleAutoDjRefresh('instruction_clear');
+    }
+  });
 }
