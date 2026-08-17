@@ -23,31 +23,15 @@ const volScoreAdmin = document.getElementById('vol-score-admin');
 const syncStatus = document.getElementById('sync-status');
 const autoDjList = document.getElementById('auto-dj-list');
 const btnAutoDjRefresh = document.getElementById('btn-auto-dj-refresh');
-const autoDjTension = document.getElementById('auto-dj-tension');
-const autoDjTensionValue = document.getElementById('auto-dj-tension-value');
 const autoDjDirBtns = document.querySelectorAll('.auto-dj-dir-btn');
 
 let _autoDjDirection = document.querySelector('.auto-dj-dir-btn.active')?.dataset?.dir ?? 'up';
-
-// Tension slider — only update display, never trigger OpenAI
-if (autoDjTension) {
-  autoDjTension.addEventListener('input', () => {
-    if (autoDjTensionValue) autoDjTensionValue.textContent = `Tension cible : ${autoDjTension.value} / 100`;
-  });
-}
-
-// Direction buttons — only update state, never trigger OpenAI
-autoDjDirBtns.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    _autoDjDirection = btn.dataset.dir;
-    autoDjDirBtns.forEach((b) => b.classList.toggle('active', b === btn));
-  });
-});
 
 let _lastHistoryTrackId = null;
 let _lastAutoDjTrackId = null;
 let _autoDjLoading = false;
 let _autoDjTimer = null;
+let _pendingAutoDjReason = null;
 
 let accessToken = null;
 let _lastSyncedTrackId = null;
@@ -72,6 +56,28 @@ async function init() {
   subscribeToQueue(handleRealtimeChange);
   loadVolumeScore();
   setInterval(loadVolumeScore, 8000);
+}
+
+function setAutoDjDirection(direction) {
+  _autoDjDirection = direction === 'down' ? 'down' : 'up';
+  autoDjDirBtns.forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.dir === _autoDjDirection);
+  });
+}
+
+function scheduleAutoDjRefresh(reason = 'manual') {
+  if (reason !== 'track_change' && _autoDjTimer) {
+    clearTimeout(_autoDjTimer);
+    _autoDjTimer = null;
+  }
+
+  if (_autoDjLoading) {
+    _pendingAutoDjReason = reason;
+    if (autoDjList) autoDjList.innerHTML = '<p class="muted">Analyse en cours...</p>';
+    return;
+  }
+
+  refreshAutoDjSuggestions(reason);
 }
 
 function setAuthUI(connected) {
@@ -113,12 +119,13 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
       .maybeSingle();
     if (nowErr) throw nowErr;
 
-    const { data: recentTracks, error: recentErr } = await supabase
+    const { data: recentTracksRaw, error: recentErr } = await supabase
       .from('play_history')
       .select('spotify_track_id, title, artist, played_at')
       .order('played_at', { ascending: false })
       .limit(10);
     if (recentErr) throw recentErr;
+    const recentTracks = [...(recentTracksRaw ?? [])].reverse();
 
     const { data: requestsRaw, error: reqErr } = await supabase
       .from('song_requests')
@@ -135,16 +142,18 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
 
     const payload = {
       now_playing: {
+        spotify_track_id: nowPlaying?.spotify_track_id ?? '',
         title: nowPlaying?.title ?? '',
         artist: nowPlaying?.artist ?? '',
       },
-      recent_tracks: (recentTracks ?? []).map((t) => ({
+      recent_tracks: recentTracks.map((t) => ({
+        spotify_track_id: t.spotify_track_id ?? '',
         title: t.title ?? '',
         artist: t.artist ?? '',
+        played_at: t.played_at ?? null,
       })),
       requests,
       dj_context: {
-        tension_target: autoDjTension ? Number(autoDjTension.value) : 60,
         direction: _autoDjDirection,
       },
     };
@@ -169,6 +178,14 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
   } finally {
     _autoDjLoading = false;
     if (btnAutoDjRefresh) btnAutoDjRefresh.disabled = false;
+
+    if (_pendingAutoDjReason) {
+      const pendingReason = _pendingAutoDjReason;
+      _pendingAutoDjReason = null;
+      setTimeout(() => {
+        scheduleAutoDjRefresh(pendingReason);
+      }, 0);
+    }
   }
 }
 
@@ -199,8 +216,9 @@ function triggerAutoDjOnTrackChange(track) {
 
   if (_autoDjTimer) clearTimeout(_autoDjTimer);
   _autoDjTimer = setTimeout(() => {
-    refreshAutoDjSuggestions('track_change');
-  }, 2000);
+    _autoDjTimer = null;
+    scheduleAutoDjRefresh('track_change');
+  }, 1500);
 }
 
 btnLogin.addEventListener('click', startPKCE);
@@ -318,7 +336,7 @@ const periodicDue = now - _lastPeriodicWrite >= PERIODIC_WRITE_MS;
 if (trackChanged) {
   _lastSyncedTrackId = track.spotify_track_id;
 
-  addTrackToPlayHistoryIfNeeded(track);
+  await addTrackToPlayHistoryIfNeeded(track);
   triggerAutoDjOnTrackChange(track);
 }
 
@@ -498,8 +516,15 @@ async function loadVolumeScore() {
 }
 
 init();
+setAutoDjDirection(_autoDjDirection);
+autoDjDirBtns.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    setAutoDjDirection(btn.dataset.dir);
+    scheduleAutoDjRefresh(btn.dataset.dir === 'down' ? 'direction_down' : 'direction_up');
+  });
+});
 if (btnAutoDjRefresh) {
   btnAutoDjRefresh.addEventListener('click', () => {
-    refreshAutoDjSuggestions('manual_click');
+    scheduleAutoDjRefresh('manual_click');
   });
 }
