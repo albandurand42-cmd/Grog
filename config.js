@@ -14,3 +14,6 @@ export const SPOTIFY_CLIENT_ID =
 
 export const SPOTIFY_TOKEN_PROXY_URL =
   `${SUPABASE_URL}/functions/v1/spotify-token`;
+
+export const AUTO_DJ_FUNCTION_URL =
+  'https://yhkcgwyyfgjeudwowgwe.supabase.co/functions/v1/auto-dj';
