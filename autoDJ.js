@@ -31,6 +31,8 @@ export async function requestAutoDjSuggestions(payload) {
     title: String(s?.title ?? '').trim(),
     artist: String(s?.artist ?? '').trim(),
     reason: String(s?.reason ?? '').trim(),
+    role: String(s?.role ?? '').trim().toLowerCase(),
+    estimated_tension: Number.isFinite(Number(s?.estimated_tension)) ? Number(s.estimated_tension) : null,
   }));
 
   for (const s of suggestions) {
@@ -141,6 +143,8 @@ export async function verifySuggestionsOnSpotify(aiSuggestions, context) {
       uri: picked.uri ?? null,
       external_url: picked.id ? `https://open.spotify.com/track/${encodeURIComponent(picked.id)}` : null,
       reason: c.reason,
+      role: c.role ?? null,
+      estimated_tension: c.estimated_tension ?? null,
     });
 
     if (out.length === 3) break;
@@ -157,13 +161,23 @@ export function renderAutoDjSuggestions(container, suggestions) {
     return;
   }
 
+  const roleLabels = { safe: 'SAFE', build: 'BUILD', bold: 'BOLD' };
+
   container.innerHTML = '';
   suggestions.forEach((s, i) => {
     const item = document.createElement('article');
     item.className = 'auto-dj-suggestion';
 
+    const roleBadge = s.role && roleLabels[s.role]
+      ? `<span class="auto-dj-role-badge auto-dj-role-${escHtml(s.role)}">${roleLabels[s.role]}</span>`
+      : `<span class="auto-dj-rank">${i + 1}</span>`;
+
+    const tensionHtml = s.estimated_tension !== null
+      ? `<small class="muted auto-dj-tension-hint">Tension estimée : ${escHtml(String(s.estimated_tension))} / 100</small>`
+      : '';
+
     item.innerHTML = `
-      <div class="auto-dj-rank">${i + 1}</div>
+      ${roleBadge}
       ${
         s.image_url
           ? `<img class="auto-dj-cover" src="${escHtml(s.image_url)}" alt="pochette ${escHtml(s.title)}" width="56" height="56" loading="lazy">`
@@ -173,6 +187,7 @@ export function renderAutoDjSuggestions(container, suggestions) {
         <strong>${escHtml(s.title)}</strong>
         <span class="muted">${escHtml(s.artist)}</span>
         <small class="muted">${escHtml(s.reason)}</small>
+        ${tensionHtml}
       </div>
       <a class="secondary auto-dj-open" href="${escHtml(s.external_url || '#')}" target="_blank" rel="noopener noreferrer">
         Ouvrir dans Spotify

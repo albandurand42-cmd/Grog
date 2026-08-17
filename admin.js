@@ -23,6 +23,26 @@ const volScoreAdmin = document.getElementById('vol-score-admin');
 const syncStatus = document.getElementById('sync-status');
 const autoDjList = document.getElementById('auto-dj-list');
 const btnAutoDjRefresh = document.getElementById('btn-auto-dj-refresh');
+const autoDjTension = document.getElementById('auto-dj-tension');
+const autoDjTensionValue = document.getElementById('auto-dj-tension-value');
+const autoDjDirBtns = document.querySelectorAll('.auto-dj-dir-btn');
+
+let _autoDjDirection = document.querySelector('.auto-dj-dir-btn.active')?.dataset?.dir ?? 'up';
+
+// Tension slider — only update display, never trigger OpenAI
+if (autoDjTension) {
+  autoDjTension.addEventListener('input', () => {
+    if (autoDjTensionValue) autoDjTensionValue.textContent = `Tension cible : ${autoDjTension.value} / 100`;
+  });
+}
+
+// Direction buttons — only update state, never trigger OpenAI
+autoDjDirBtns.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    _autoDjDirection = btn.dataset.dir;
+    autoDjDirBtns.forEach((b) => b.classList.toggle('active', b === btn));
+  });
+});
 
 let _lastHistoryTrackId = null;
 let _lastAutoDjTrackId = null;
@@ -123,6 +143,10 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
         artist: t.artist ?? '',
       })),
       requests,
+      dj_context: {
+        tension_target: autoDjTension ? Number(autoDjTension.value) : 60,
+        direction: _autoDjDirection,
+      },
     };
 
     const aiSuggestions = await requestAutoDjSuggestions(payload);
