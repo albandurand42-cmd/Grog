@@ -1,5 +1,6 @@
 import { searchTracks } from './spotify.js';
 import { escHtml } from './utils.js';
+import { supabase } from './supabase.js';
 import { AUTO_DJ_FUNCTION_URL } from './config.js';
 
 function norm(s) {
@@ -10,6 +11,10 @@ function titleArtistKey(title, artist) {
   return `${norm(title)}::${norm(artist)}`;
 }
 
+/**
+ * Request AI suggestions from Edge Function V3
+ * Returns { analysis, candidates }
+ */
 export async function requestAutoDjSuggestions(payload) {
   const res = await fetch(AUTO_DJ_FUNCTION_URL, {
     method: 'POST',
@@ -23,57 +28,72 @@ export async function requestAutoDjSuggestions(payload) {
   }
 
   const json = await res.json();
-  if (!json || !Array.isArray(json.suggestions) || json.suggestions.length !== 3) {
-    throw new Error('Réponse auto-dj invalide: il faut exactement 3 suggestions');
+  if (!json || !json.analysis || !Array.isArray(json.candidates)) {
+    throw new Error('Invalid auto-dj response: missing analysis or candidates');
   }
 
-  const suggestions = json.suggestions.map((s) => ({
-    title: String(s?.title ?? '').trim(),
-    artist: String(s?.artist ?? '').trim(),
-    reason: String(s?.reason ?? '').trim(),
-    role: String(s?.role ?? '').trim().toLowerCase(),
-    estimated_tension: Number.isFinite(Number(s?.estimated_tension)) ? Number(s.estimated_tension) : null,
+  // Validate candidates
+  const candidates = json.candidates.map((c) => ({
+    title: String(c?.title ?? '').trim(),
+    artist: String(c?.artist ?? '').trim(),
+    reason: String(c?.reason ?? '').trim(),
+    role_hint: String(c?.role_hint ?? 'neutral').trim().toLowerCase(),
+    estimated_tension: Number.isFinite(Number(c?.estimated_tension))
+      ? Number(c.estimated_tension)
+      : 50,
   }));
 
-  for (const s of suggestions) {
-    if (!s.title || !s.artist || !s.reason) {
-      throw new Error('Suggestion IA incomplète');
-    }
-  }
-
-  return suggestions;
+  return {
+    analysis: json.analysis,
+    candidates,
+  };
 }
 
 /**
- * @param {Array<{title:string,artist:string,reason:string}>} aiSuggestions
- * @param {{
- *   nowPlaying: { spotify_track_id?:string|null, title?:string, artist?:string }|null,
- *   recentTracks: Array<{spotify_track_id?:string|null,title?:string,artist?:string}>,
- *   requests: Array<{title:string,artist:string,votes:number}>
- * }} context
+ * Verify and filter candidates on Spotify with anti-repetition logic
  */
-export async function verifySuggestionsOnSpotify(aiSuggestions, context) {
+export async function verifySuggestionsOnSpotify(
+  aiResponse,
+  context
+) {
+  const { analysis, candidates } = aiResponse;
   const now = context?.nowPlaying ?? null;
   const recentTracks = context?.recentTracks ?? [];
   const requests = context?.requests ?? [];
+  const recentSuggestions = context?.recentSuggestions ?? [];
 
   const nowId = now?.spotify_track_id ?? null;
   const nowArtist = norm(now?.artist ?? '');
 
+  // Build sets of tracks to avoid
   const recentIds = new Set(recentTracks.map((t) => t.spotify_track_id).filter(Boolean));
   const recentKeys = new Set(recentTracks.map((t) => titleArtistKey(t.title, t.artist)));
 
+  // Penalize artists suggested but never played recently
+  const ignoredArtists = new Map();
+  const ignoredTracks = new Map();
+  for (const s of recentSuggestions) {
+    if (!s.was_played) {
+      const artistKey = norm(s.artist);
+      ignoredArtists.set(artistKey, (ignoredArtists.get(artistKey) || 0) + 1);
+      ignoredTracks.set(titleArtistKey(s.title, s.artist), (ignoredTracks.get(titleArtistKey(s.title, s.artist)) || 0) + 1);
+    }
+  }
+
+  // Public requests sorted by votes
   const pendingHighVotes = requests
     .filter((r) => r?.title && r?.artist)
     .sort((a, b) => (b.votes ?? 0) - (a.votes ?? 0));
 
-  // Mélange: d’abord IA, puis demandes populaires en fallback
-  const candidates = [
-    ...aiSuggestions.map((x) => ({ ...x, source: 'ai' })),
+  // Build candidate pool: AI suggestions first, then high-voted requests
+  const candidatePool = [
+    ...candidates.map((x) => ({ ...x, source: 'ai' })),
     ...pendingHighVotes.map((r) => ({
       title: r.title,
       artist: r.artist,
       reason: r.votes > 1 ? `Demande très votée (${r.votes} votes)` : 'Demande invitée',
+      role_hint: 'neutral',
+      estimated_tension: 50,
       source: 'request',
     })),
   ];
@@ -81,17 +101,18 @@ export async function verifySuggestionsOnSpotify(aiSuggestions, context) {
   const usedIds = new Set();
   const usedKeys = new Set();
   const usedArtists = new Set();
+  const roleCount = { safe: 0, build: 0, bold: 0 };
 
-  const out = [];
+  const verified = [];
 
-  for (const c of candidates) {
+  for (const c of candidatePool) {
     const q = `${c.title} ${c.artist}`.trim();
     const results = await searchTracks(q, 8);
     if (!results.length) continue;
 
     let picked = null;
 
-    // 1er passage strict
+    // First pass: strict filtering
     for (const r of results) {
       const key = titleArtistKey(r.title, r.artist);
       const artistKey = norm(r.artist);
@@ -103,13 +124,17 @@ export async function verifySuggestionsOnSpotify(aiSuggestions, context) {
       if (usedIds.has(r.id)) continue;
       if (usedKeys.has(key)) continue;
       if (usedArtists.has(artistKey)) continue;
-      if (artistKey === nowArtist) continue; // éviter même artiste que morceau courant si possible
+      if (artistKey === nowArtist) continue;
+
+      // Anti-repetition: penalize ignored suggestions
+      const timesIgnored = ignoredTracks.get(key) || 0;
+      if (timesIgnored > 2) continue;
 
       picked = r;
       break;
     }
 
-    // 2e passage plus permissif (autorise même artiste courant)
+    // Second pass: more permissive (allow same artist as current)
     if (!picked) {
       for (const r of results) {
         const key = titleArtistKey(r.title, r.artist);
@@ -123,6 +148,9 @@ export async function verifySuggestionsOnSpotify(aiSuggestions, context) {
         if (usedKeys.has(key)) continue;
         if (usedArtists.has(artistKey)) continue;
 
+        const timesIgnored = ignoredTracks.get(key) || 0;
+        if (timesIgnored > 3) continue;
+
         picked = r;
         break;
       }
@@ -131,11 +159,22 @@ export async function verifySuggestionsOnSpotify(aiSuggestions, context) {
     if (!picked) continue;
 
     const key = titleArtistKey(picked.title, picked.artist);
+    const artistKey = norm(picked.artist);
+
+    // Assign role: prefer diversification
+    let role = c.role_hint;
+    if (role === 'neutral' || !['safe', 'build', 'bold'].includes(role)) {
+      // Auto-assign to underrepresented role
+      const sorted = Object.entries(roleCount).sort(([, a], [, b]) => a - b);
+      role = sorted[0][0];
+    }
+
     usedIds.add(picked.id);
     usedKeys.add(key);
-    usedArtists.add(norm(picked.artist));
+    usedArtists.add(artistKey);
+    roleCount[role]++;
 
-    out.push({
+    verified.push({
       spotify_track_id: picked.id,
       title: picked.title,
       artist: picked.artist,
@@ -143,38 +182,138 @@ export async function verifySuggestionsOnSpotify(aiSuggestions, context) {
       uri: picked.uri ?? null,
       external_url: picked.id ? `https://open.spotify.com/track/${encodeURIComponent(picked.id)}` : null,
       reason: c.reason,
-      role: c.role ?? null,
-      estimated_tension: c.estimated_tension ?? null,
+      role,
+      estimated_tension: c.estimated_tension ?? 50,
     });
 
-    if (out.length === 3) break;
+    // Stop at 3 final suggestions
+    if (verified.length === 3) break;
   }
 
-  return out.slice(0, 3);
+  return {
+    analysis,
+    suggestions: verified.slice(0, 3),
+  };
 }
 
-export function renderAutoDjSuggestions(container, suggestions) {
+/**
+ * Record suggestions to suggestion_history table
+ */
+export async function recordSuggestionsToHistory(suggestions, generationId) {
+  if (!suggestions || suggestions.length === 0) return;
+
+  try {
+    const rows = suggestions.map((s) => ({
+      spotify_track_id: s.spotify_track_id,
+      title: s.title,
+      artist: s.artist,
+      role: s.role || 'neutral',
+      suggested_at: new Date().toISOString(),
+      was_played: false,
+      generation_id: generationId,
+    }));
+
+    const { error } = await supabase.from('suggestion_history').insert(rows);
+    if (error) {
+      console.warn('[AUTO-DJ] suggestion_history insert warning:', error.message);
+    } else {
+      console.log('[AUTO-DJ] recorded', rows.length, 'suggestions to history');
+    }
+  } catch (err) {
+    console.warn('[AUTO-DJ] suggestion_history insert exception:', err?.message ?? String(err));
+  }
+}
+
+/**
+ * Mark a track as played in suggestion_history
+ */
+export async function markSuggestionAsPlayed(spotifyTrackId) {
+  if (!spotifyTrackId) return;
+
+  try {
+    // Find recent unplayed suggestion with this track
+    const { data, error: selectErr } = await supabase
+      .from('suggestion_history')
+      .select('id')
+      .eq('spotify_track_id', spotifyTrackId)
+      .eq('was_played', false)
+      .order('suggested_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (selectErr) {
+      console.warn('[AUTO-DJ] mark as played select error:', selectErr.message);
+      return;
+    }
+
+    if (!data) return;
+
+    const { error: updateErr } = await supabase
+      .from('suggestion_history')
+      .update({ was_played: true })
+      .eq('id', data.id);
+
+    if (updateErr) {
+      console.warn('[AUTO-DJ] mark as played update error:', updateErr.message);
+    } else {
+      console.log('[AUTO-DJ] marked suggestion as played:', spotifyTrackId);
+    }
+  } catch (err) {
+    console.warn('[AUTO-DJ] mark as played exception:', err?.message ?? String(err));
+  }
+}
+
+/**
+ * Render suggestions with analysis and role-based diversification
+ */
+export function renderAutoDjSuggestions(container, response) {
   if (!container) return;
 
-  if (!suggestions?.length) {
+  const { analysis, suggestions } = response;
+
+  if (!suggestions || suggestions.length === 0) {
     container.innerHTML = '<div class="empty-state">Aucune suggestion valide disponible.</div>';
     return;
   }
 
   const roleLabels = { safe: 'SAFE', build: 'BUILD', bold: 'BOLD' };
+  const directionArrow = analysis.direction === 'up' ? '↗' : analysis.direction === 'down' ? '↘' : '→';
 
-  container.innerHTML = '';
-  suggestions.forEach((s, i) => {
+  // Render analysis section
+  const analysisHtml = `
+    <div class="auto-dj-analysis">
+      <p class="auto-dj-analysis-title">GROG détecte :</p>
+      <p class="auto-dj-analysis-content">
+        <strong>${escHtml(analysis.current_style)}</strong>
+        <span class="auto-dj-analysis-sep">·</span>
+        <span>${escHtml(analysis.trajectory)}</span>
+        <span class="auto-dj-analysis-sep">·</span>
+        <span>Énergie ${analysis.energy_estimate}/100</span>
+        <span class="auto-dj-analysis-sep">·</span>
+        <span>${directionArrow} ${analysis.direction === 'up' ? 'Montée' : analysis.direction === 'down' ? 'Descente' : 'Stable'}</span>
+      </p>
+    </div>
+  `;
+
+  container.innerHTML = analysisHtml;
+
+  // Render suggestions
+  const suggestionsHtml = document.createElement('div');
+  suggestionsHtml.className = 'auto-dj-suggestions-grid';
+
+  suggestions.forEach((s) => {
     const item = document.createElement('article');
     item.className = 'auto-dj-suggestion';
 
-    const roleBadge = s.role && roleLabels[s.role]
-      ? `<span class="auto-dj-role-badge auto-dj-role-${escHtml(s.role)}">${roleLabels[s.role]}</span>`
-      : `<span class="auto-dj-rank">${i + 1}</span>`;
+    const roleBadge =
+      s.role && roleLabels[s.role]
+        ? `<span class="auto-dj-role-badge auto-dj-role-${escHtml(s.role)}">${roleLabels[s.role]}</span>`
+        : '';
 
-    const tensionHtml = s.estimated_tension !== null
-      ? `<small class="muted auto-dj-tension-hint">Tension estimée : ${escHtml(String(s.estimated_tension))} / 100</small>`
-      : '';
+    const tensionHtml =
+      s.estimated_tension !== null
+        ? `<small class="muted auto-dj-tension-hint">Tension : ${Math.round(s.estimated_tension)}</small>`
+        : '';
 
     item.innerHTML = `
       ${roleBadge}
@@ -190,10 +329,12 @@ export function renderAutoDjSuggestions(container, suggestions) {
         ${tensionHtml}
       </div>
       <a class="secondary auto-dj-open" href="${escHtml(s.external_url || '#')}" target="_blank" rel="noopener noreferrer">
-        Ouvrir dans Spotify
+        Spotify
       </a>
     `;
 
-    container.appendChild(item);
+    suggestionsHtml.appendChild(item);
   });
+
+  container.appendChild(suggestionsHtml);
 }
