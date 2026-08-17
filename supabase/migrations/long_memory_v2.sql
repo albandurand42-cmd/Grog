@@ -68,10 +68,13 @@ DECLARE
 BEGIN
   UPDATE suggestion_history
   SET was_played = TRUE
-  WHERE spotify_track_id = p_spotify_track_id
-    AND was_played = FALSE
-  ORDER BY suggested_at DESC
-  LIMIT p_limit;
+  WHERE id IN (
+    SELECT id FROM suggestion_history
+    WHERE spotify_track_id = p_spotify_track_id
+      AND was_played = FALSE
+    ORDER BY suggested_at DESC
+    LIMIT p_limit
+  );
 
   GET DIAGNOSTICS v_updated = ROW_COUNT;
   RETURN v_updated;
