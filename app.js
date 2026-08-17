@@ -181,11 +181,13 @@ supabase
 
 // ----- Now Playing -----
 
+let _currentTrackId = null; // Stocke l'ID du morceau actuellement affiché
+
 async function loadNowPlaying() {
   try {
     const { data, error } = await supabase
       .from('now_playing')
-      .select('title, artist, image_url')
+      .select('spotify_track_id, title, artist, image_url')
       .order('id', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -201,8 +203,16 @@ async function loadNowPlaying() {
 function renderNowPlaying(data) {
   if (!data) {
     nowPlayingDisplay.innerHTML = '<div class="empty-state">Le DJ n\'a pas encore renseigné le morceau en cours.</div>';
+    _currentTrackId = null;
     return;
   }
+  
+  // Mettre à jour uniquement si le morceau a changé
+  if (_currentTrackId === data.spotify_track_id) {
+    return; // Aucun changement, ne pas refaire le DOM
+  }
+  
+  _currentTrackId = data.spotify_track_id;
   nowPlayingDisplay.innerHTML = `
     <div class="np-public-card">
       ${data.image_url
@@ -216,14 +226,22 @@ function renderNowPlaying(data) {
   `;
 }
 
-// Realtime now_playing
+// Realtime now_playing (méthode principale)
 supabase
   .channel('public:now_playing')
   .on('postgres_changes', { event: '*', schema: 'public', table: 'now_playing' }, (payload) => {
     console.log('[now_playing] Realtime event :', payload);
-    loadNowPlaying();
+    // Utiliser directement payload.new si disponible
+    if (payload.new && payload.new.title) {
+      renderNowPlaying(payload.new);
+    } else {
+      loadNowPlaying();
+    }
   })
   .subscribe((status) => console.log('[now_playing] Realtime subscribe status :', status));
+
+// Fallback de sécurité : vérifier toutes les 2 secondes
+setInterval(loadNowPlaying, 2000);
 
 // ----- Bootstrap -----
 
