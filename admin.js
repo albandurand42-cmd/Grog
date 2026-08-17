@@ -179,7 +179,11 @@ async function buildDjProfile() {
 }
 
 async function refreshAutoDjSuggestions(reason = 'manual') {
-  if (_autoDjLoading) return;
+  if (_autoDjLoading) {
+    _pendingAutoDjReason = reason;
+    if (autoDjList) autoDjList.innerHTML = '<p class="muted">Analyse en cours...</p>';
+    return;
+  }
   _autoDjLoading = true;
 
   try {
@@ -244,6 +248,7 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
       ...(djProfile ? { dj_profile: djProfile } : {}),
     };
 
+    console.log('[AUTO-DJ] payload', payload);
     const aiSuggestions = await requestAutoDjSuggestions(payload);
 
     const verified = await verifySuggestionsOnSpotify(aiSuggestions, {
@@ -252,6 +257,7 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
       requests,
       recentSuggestions,
     });
+    console.log('[AUTO-DJ] spotify verified', verified);
 
     renderAutoDjSuggestions(autoDjList, verified);
 
@@ -263,11 +269,7 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
 
     console.log('[AUTO-DJ] suggestions refreshed:', reason, 'count=', verified.suggestions?.length ?? 0);
   } catch (err) {
-    console.error('[AUTO-DJ] refresh error:', {
-      reason,
-      message: err?.message ?? String(err),
-      name: err?.name ?? 'Error',
-    });
+    console.error('[AUTO-DJ] refresh error', err);
     if (autoDjList) autoDjList.innerHTML = '<div class="empty-state error-state">Impossible de générer les suggestions.</div>';
   } finally {
     _autoDjLoading = false;
@@ -634,7 +636,8 @@ autoDjDirBtns.forEach((btn) => {
   });
 });
 if (btnAutoDjRefresh) {
-  btnAutoDjRefresh.addEventListener('click', () => {
-    scheduleAutoDjRefresh('manual_click');
-  });
+  btnAutoDjRefresh.onclick = () => {
+    console.log('[AUTO-DJ] manual refresh click');
+    refreshAutoDjSuggestions('manual_click');
+  };
 }
