@@ -198,8 +198,11 @@ export async function verifySuggestionsOnSpotify(
 
 /**
  * Record suggestions to suggestion_history table
+ * @param {Array} suggestions - verified suggestion objects
+ * @param {string} generationId - unique id for this batch
+ * @param {{ direction?: string, context_style?: string }} [context]
  */
-export async function recordSuggestionsToHistory(suggestions, generationId) {
+export async function recordSuggestionsToHistory(suggestions, generationId, context = {}) {
   if (!suggestions || suggestions.length === 0) return;
 
   try {
@@ -211,6 +214,10 @@ export async function recordSuggestionsToHistory(suggestions, generationId) {
       suggested_at: new Date().toISOString(),
       was_played: false,
       generation_id: generationId,
+      reason: s.reason ?? null,
+      estimated_tension: Number.isFinite(s.estimated_tension) ? Math.round(s.estimated_tension) : null,
+      direction: context.direction ?? null,
+      context_style: context.context_style ?? null,
     }));
 
     const { error } = await supabase.from('suggestion_history').insert(rows);
