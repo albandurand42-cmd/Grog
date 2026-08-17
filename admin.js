@@ -687,7 +687,9 @@ if (btnApplyInstruction) {
     _autoDjInstruction = autoDjInstructionInput ? autoDjInstructionInput.value.trim() : '';
     localStorage.setItem('grog_auto_dj_instruction', _autoDjInstruction);
     console.log('[AUTO-DJ] instruction applied:', _autoDjInstruction);
-    scheduleAutoDjRefresh('instruction_apply');
+    if (_autoDjEnabled) {
+      scheduleAutoDjRefresh('instruction_apply');
+    }
   });
 }
 
