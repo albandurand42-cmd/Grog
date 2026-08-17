@@ -66,7 +66,7 @@ function setAutoDjDirection(direction) {
 }
 
 function scheduleAutoDjRefresh(reason = 'manual') {
-  if (reason !== 'track_change' && _autoDjTimer) {
+  if (_autoDjTimer) {
     clearTimeout(_autoDjTimer);
     _autoDjTimer = null;
   }

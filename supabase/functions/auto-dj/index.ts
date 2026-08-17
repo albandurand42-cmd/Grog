@@ -182,7 +182,12 @@ async function fetchSuggestions(payload: {
     throw new Error('Réponse OpenAI vide');
   }
 
-  const parsed = JSON.parse(content);
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    throw new Error('Réponse OpenAI JSON invalide');
+  }
   if (!Array.isArray(parsed?.suggestions) || parsed.suggestions.length !== 3) {
     throw new Error('Réponse suggestions invalide');
   }
