@@ -1,6 +1,7 @@
 // Contrôleur de la page admin DJ (admin.html).
 // Gère l'authentification Spotify PKCE, la lecture, les demandes invités, les votes volume et now_playing.
 
+import { APP_VERSION } from './config.js';
 import { startPKCE, handleCallback, getStoredTokens, logout, refreshAccessToken } from './auth.js';
 import { fetchPendingRequests, subscribeToQueue } from './queue.js';
 import { supabase } from './supabase.js';
@@ -30,7 +31,10 @@ const autoDjInstructionInput = document.getElementById('auto-dj-instruction');
 const btnApplyInstruction = document.getElementById('auto-dj-apply-instruction');
 const btnClearInstruction = document.getElementById('auto-dj-clear-instruction');
 
-let _autoDjDirection = document.querySelector('.auto-dj-dir-btn.active')?.dataset?.dir ?? 'up';
+const appVersionEl = document.getElementById('app-version');
+if (appVersionEl) appVersionEl.textContent = `GROG v${APP_VERSION}`;
+
+
 let _autoDjEnabled = localStorage.getItem('grog_auto_dj_enabled') !== 'false';
 let _autoDjInstruction = localStorage.getItem('grog_auto_dj_instruction') ?? '';
 
