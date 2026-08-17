@@ -3,6 +3,7 @@
 
 import { startPKCE, handleCallback, getStoredTokens, logout, refreshAccessToken } from './auth.js';
 import { fetchPendingRequests, subscribeToQueue } from './queue.js';
+import { APP_VERSION } from './config.js';
 import { supabase } from './supabase.js';
 import { escHtml } from './utils.js';
 import { fetchVolumeScore } from './votes.js';
@@ -29,6 +30,7 @@ const autoDjBody = document.getElementById('auto-dj-body');
 const autoDjInstructionInput = document.getElementById('auto-dj-instruction');
 const btnApplyInstruction = document.getElementById('auto-dj-apply-instruction');
 const btnClearInstruction = document.getElementById('auto-dj-clear-instruction');
+const appVersionEl = document.getElementById('app-version');
 
 let _autoDjDirection = document.querySelector('.auto-dj-dir-btn.active')?.dataset?.dir ?? 'up';
 let _autoDjEnabled = localStorage.getItem('grog_auto_dj_enabled') !== 'false';
@@ -46,6 +48,10 @@ let _lastSyncedIsPlaying = null;
 let _lastPeriodicWrite = 0;
 let _syncInterval = null;
 const PERIODIC_WRITE_MS = 8000;
+
+if (appVersionEl) {
+  appVersionEl.textContent = `GROG v${APP_VERSION}`;
+}
 
 async function init() {
   const tokens = await handleCallback().catch(() => null);

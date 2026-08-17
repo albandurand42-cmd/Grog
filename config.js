@@ -2,6 +2,7 @@
 // Les clés publiques peuvent être présentes dans GitHub.
 
 export const APP_NAME = 'Grog';
+export const APP_VERSION = '0.1.0';
 
 export const SUPABASE_URL =
   'https://yhkcgwyyfgjeudwowgwe.supabase.co';
