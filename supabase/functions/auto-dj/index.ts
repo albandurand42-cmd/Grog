@@ -41,6 +41,7 @@ type AutoDJPayload = {
 
 type Analysis = {
   current_style: string;
+  target_style: string;
   trajectory: string;
   energy_estimate: number;
   direction: Direction;
@@ -192,6 +193,7 @@ function buildDjProfileSection(profile: DJProfile | null): string {
 }
 
 function buildPrompt(payload: AutoDJPayload): string {
+  const hasInstruction = Boolean(payload.dj_context.instruction);
   const directionText = payload.dj_context.direction === 'down'
     ? 'DESCENDRE la tension'
     : 'MONTER la tension';
@@ -220,7 +222,7 @@ function buildPrompt(payload: AutoDJPayload): string {
 
   const djProfileText = buildDjProfileSection(payload.dj_profile);
 
-  const instructionText = payload.dj_context.instruction
+  const instructionText = hasInstruction
     ? `CONSIGNE DIRECTE DU DJ : "${payload.dj_context.instruction}"`
     : 'Aucune consigne DJ manuelle';
 
@@ -231,16 +233,39 @@ function buildPrompt(payload: AutoDJPayload): string {
     '',
     `${instructionText}`,
     '',
+    'RÈGLE FORTE:',
+    'Une CONSIGNE DIRECTE DU DJ est une instruction prioritaire.',
+    "Lorsqu'elle est présente, les candidats proposés doivent respecter directement cette consigne.",
+    'Le contexte musical récent sert à déterminer comment rejoindre cette nouvelle direction, et NON à annuler ou remplacer la consigne.',
+    "Exemple: si le contexte actuel est Pop et que le DJ demande 'je veux les meilleurs classiques de jazz', proposer majoritairement de véritables classiques du jazz.",
+    "Il est INTERDIT de continuer simplement à proposer de la Pop sous prétexte que les morceaux précédents sont Pop.",
+    'Au moins 80% des candidats générés doivent correspondre directement à la consigne DJ.',
+    "Si la consigne demande explicitement un genre, une époque, un artiste, une ambiance ou un niveau de popularité, respecter ce critère en priorité.",
+    "Quand une consigne est présente, `analysis.target_style` doit refléter la consigne DJ et `analysis.trajectory` doit expliciter la transition `current_style -> target_style`.",
+    '',
     'Objectif (par ordre de priorité):',
-    '1. Respecter les morceaux réellement joués récemment comme trajectoire principale.',
-    '2. Respecter la direction up/down demandée.',
-    '3. Appliquer la consigne DJ manuelle en construisant une transition cohérente (ne pas ignorer le contexte réel).',
-    '4. Prendre en compte les demandes publiques si cohérentes avec style/trajectoire/direction.',
-    '5. Utiliser le profil historique du DJ.',
-    '6. Pénaliser les suggestions déjà ignorées récemment.',
+    ...(hasInstruction
+      ? [
+        '1. Appliquer la consigne DJ manuelle en priorité absolue.',
+        '2. Respecter la direction up/down demandée.',
+        "3. Utiliser l'historique récent uniquement pour construire une transition vers la consigne (sans annuler la consigne).",
+        '4. Prendre en compte les demandes publiques seulement si elles restent cohérentes avec la consigne.',
+        '5. Utiliser le profil historique du DJ.',
+        '6. Pénaliser les suggestions déjà ignorées récemment.',
+      ]
+      : [
+        '1. Respecter les morceaux réellement joués récemment comme trajectoire principale.',
+        '2. Respecter la direction up/down demandée.',
+        '3. Prendre en compte les demandes publiques si cohérentes avec style/trajectoire/direction.',
+        '4. Utiliser le profil historique du DJ.',
+        '5. Pénaliser les suggestions déjà ignorées récemment.',
+      ]),
     '- Éviter les morceaux récemment joués.',
     '- Varier les artistes (éviter les doublons artiste).',
     '- Générer environ 15 candidats diversifiés.',
+    ...(hasInstruction
+      ? ['- IMPORTANT: Sur 15 candidats, au moins 12 doivent correspondre directement à la consigne DJ. Les 3 autres max peuvent être des transitions.']
+      : []),
     '',
     `Now playing: ${nowPlayingText}`,
     '',
@@ -259,6 +284,7 @@ function buildPrompt(payload: AutoDJPayload): string {
     '{',
     '  "analysis": {',
     '    "current_style": "string",',
+    '    "target_style": "string",',
     '    "trajectory": "string",',
     '    "energy_estimate": 0-100 integer,',
     `    "direction": "${payload.dj_context.direction}",`,
@@ -288,6 +314,7 @@ function stripJsonFences(text: string): string {
 function parseAnalysis(raw: unknown, expectedDirection: Direction): Analysis | null {
   const src = asRecord(raw);
   const current_style = asText(src.current_style);
+  const target_style = asText(src.target_style) || current_style;
   const trajectory = asText(src.trajectory);
   const energy_estimate = asIntInRange(src.energy_estimate, 0, 100);
   const direction = src.direction === 'up' || src.direction === 'down' ? src.direction : null;
@@ -298,6 +325,7 @@ function parseAnalysis(raw: unknown, expectedDirection: Direction): Analysis | n
 
   return {
     current_style,
+    target_style,
     trajectory,
     energy_estimate,
     direction,
@@ -357,6 +385,12 @@ async function fetchAutoDJV3(payload: AutoDJPayload): Promise<AutoDJV3Response> 
   if (!apiKey) throw new Error('OPENAI_API_KEY manquant');
 
   const model = Deno.env.get('OPENAI_MODEL') || DEFAULT_OPENAI_MODEL;
+  console.log('[AUTO-DJ][EDGE] OpenAI request', {
+    model,
+    direction: payload.dj_context.direction,
+    instruction: payload.dj_context.instruction,
+    hasInstruction: Boolean(payload.dj_context.instruction),
+  });
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -371,7 +405,12 @@ async function fetchAutoDJV3(payload: AutoDJPayload): Promise<AutoDJV3Response> 
       messages: [
         {
           role: 'system',
-          content: 'Tu es un assistant Auto-DJ expert. Tu dois toujours répondre un JSON strict au format demandé.',
+          content: [
+            'Tu es un assistant Auto-DJ expert. Tu dois toujours répondre un JSON strict au format demandé.',
+            'Une CONSIGNE DIRECTE DU DJ est prioritaire quand elle est présente.',
+            "Le contexte récent sert à préparer la transition vers la consigne, jamais à l'annuler.",
+            "Quand une consigne est fournie, au moins 80% (12/15) des candidats doivent correspondre directement à cette consigne.",
+          ].join(' '),
         },
         {
           role: 'user',
@@ -419,6 +458,7 @@ serve(async (req) => {
 
   try {
     const payload = parsePayload(await req.json());
+    console.log('[AUTO-DJ][EDGE] payload.dj_context.instruction received:', payload.dj_context.instruction);
 
     if (!payload.now_playing || (!payload.now_playing.title && !payload.now_playing.artist)) {
       return new Response(JSON.stringify({ error: 'Missing now_playing' }), {

@@ -269,6 +269,7 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
     };
 
     console.log('[AUTO-DJ] context sent:', payload.dj_context);
+    console.log('[AUTO-DJ] payload instruction exact:', payload.dj_context.instruction);
     const aiSuggestions = await requestAutoDjSuggestions(payload);
 
     const verified = await verifySuggestionsOnSpotify(aiSuggestions, {
@@ -276,6 +277,7 @@ async function refreshAutoDjSuggestions(reason = 'manual') {
       recentTracks: recentTracks ?? [],
       requests,
       recentSuggestions,
+      instruction: _autoDjInstruction,
     });
     console.log('[AUTO-DJ] spotify verified', verified);
 
