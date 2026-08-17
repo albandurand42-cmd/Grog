@@ -286,20 +286,24 @@ async function syncNowPlaying() {
   setSyncStatus(track.is_playing ? 'playing' : 'paused');
   updateNowPlayingAdminUI(track);
 
-  const now = Date.now();
-  const trackChanged = track.spotify_track_id !== _lastSyncedTrackId;
-  if (trackChanged) {
+const now = Date.now();
+const trackChanged = track.spotify_track_id !== _lastSyncedTrackId;
+const playStateChanged = track.is_playing !== _lastSyncedIsPlaying;
+const periodicDue = now - _lastPeriodicWrite >= PERIODIC_WRITE_MS;
+
+if (trackChanged) {
+  _lastSyncedTrackId = track.spotify_track_id;
+
   addTrackToPlayHistoryIfNeeded(track);
   triggerAutoDjOnTrackChange(track);
 }
-  const playStateChanged = track.is_playing !== _lastSyncedIsPlaying;
-  const periodicDue = now - _lastPeriodicWrite >= PERIODIC_WRITE_MS;
-  if (!trackChanged && !playStateChanged && !periodicDue) return;
 
-  if (trackChanged) _lastSyncedTrackId = track.spotify_track_id;
-  _lastSyncedIsPlaying = track.is_playing;
-  _lastPeriodicWrite = now;
-  await writeNowPlayingToSupabase(track);
+if (!trackChanged && !playStateChanged && !periodicDue) return;
+
+_lastSyncedIsPlaying = track.is_playing;
+_lastPeriodicWrite = now;
+
+await writeNowPlayingToSupabase(track);
 }
 
 async function writeNowPlayingToSupabase(track) {
