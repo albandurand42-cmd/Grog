@@ -270,28 +270,69 @@ function subscribeRealtime() {
 
 // ----- Commentaires TV -----
 
+const MAX_RECENT = 5;          // taille max de la liste tournante
+const DISPLAY_MS = 6000;       // durée d'affichage d'un commentaire
+const BETWEEN_MS = 700;        // pause entre deux commentaires
+
 let commentOverlay = null;
-const _shownCommentIds = new Set();
-let _commentQueue = [];
+
+// Les 5 derniers commentaires approuvés (boucle)
+let _recentComments = [];
+// Index courant dans la boucle
+let _loopIndex = 0;
+// Commentaires prioritaires (nouveaux arrivés via Realtime)
+let _pendingPriority = [];
+// Vrai quand un commentaire est en cours d'affichage
 let _commentDisplaying = false;
 
-function enqueueComment(row) {
-  if (_shownCommentIds.has(row.id)) return;
-  _shownCommentIds.add(row.id);
-  _commentQueue.push(row);
+/**
+ * Ajoute un commentaire à la liste des 5 derniers sans doublon.
+ * Retourne true si le commentaire a été ajouté.
+ */
+function addToRecent(row) {
+  const alreadyIn = _recentComments.some(c => c.id === row.id);
+  if (alreadyIn) return false;
+  _recentComments.push(row);
+  if (_recentComments.length > MAX_RECENT) {
+    _recentComments.shift(); // supprimer le plus ancien
+    // Ajuster l'index si nécessaire pour éviter un saut
+    if (_loopIndex > 0) _loopIndex--;
+  }
+  return true;
+}
+
+/**
+ * Appelé quand un nouveau commentaire est approuvé (Realtime ou chargement initial).
+ * Pour le chargement initial on n'ajoute pas en priorité.
+ */
+function enqueueComment(row, { priority = false } = {}) {
+  const added = addToRecent(row);
+  if (priority && added) {
+    _pendingPriority.push(row);
+  }
   if (!_commentDisplaying) showNextComment();
 }
 
 function showNextComment() {
-  if (!_commentQueue.length || !commentOverlay) {
+  if (!commentOverlay || _recentComments.length === 0) {
     _commentDisplaying = false;
     return;
   }
   _commentDisplaying = true;
-  const row = _commentQueue.shift();
+
+  let row;
+  if (_pendingPriority.length > 0) {
+    // Priorité aux nouveaux commentaires
+    row = _pendingPriority.shift();
+  } else {
+    // Boucle circulaire sur les 5 derniers
+    if (_loopIndex >= _recentComments.length) _loopIndex = 0;
+    row = _recentComments[_loopIndex];
+    _loopIndex = (_loopIndex + 1) % _recentComments.length;
+  }
+
   showComment(row, () => {
-    // Petite pause entre deux commentaires
-    setTimeout(showNextComment, 800);
+    setTimeout(showNextComment, BETWEEN_MS);
   });
 }
 
@@ -316,11 +357,11 @@ function showComment(comment, onDone) {
     requestAnimationFrame(() => { commentOverlay.classList.add('visible'); });
   });
 
-  // Disparition après 6 s
+  // Disparition après DISPLAY_MS
   setTimeout(() => {
     commentOverlay.classList.remove('visible');
     setTimeout(onDone, 300); // attendre la transition de sortie
-  }, 6000);
+  }, DISPLAY_MS);
 }
 
 async function loadRecentApprovedComments() {
@@ -330,11 +371,14 @@ async function loadRecentApprovedComments() {
       .from('comments')
       .select('id, guest_name, message, status, approved_at')
       .eq('status', 'approved')
-      .order('approved_at', { ascending: true })
-      .limit(10);
+      .order('approved_at', { ascending: false })
+      .limit(MAX_RECENT);
     console.log('[TV COMMENTS] select result:', { data, error });
     if (error) throw error;
-    for (const row of (data ?? [])) enqueueComment(row);
+    // Remettre dans l'ordre chronologique pour la boucle
+    const rows = (data ?? []).reverse();
+    for (const row of rows) addToRecent(row);
+    if (_recentComments.length > 0) showNextComment();
   } catch (err) {
     console.error('[TV] erreur chargement commentaires récents :', err);
   }
@@ -348,7 +392,7 @@ function subscribeToComments() {
       const row = payload.new;
       if (row?.status === 'approved') {
         console.log('[TV COMMENTS] approved comment:', row);
-        enqueueComment(row);
+        enqueueComment(row, { priority: true });
       }
     })
     .subscribe((status) => console.log('[TV] Comments Realtime status:', status));
