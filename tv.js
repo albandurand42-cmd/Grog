@@ -397,7 +397,7 @@ function removeFromTv(id) {
   _pendingPriority = _pendingPriority.filter(c => String(c.id) !== strId);
   if (_recentComments.length < beforeLen) {
     // Réajuster l'index de boucle pour éviter un saut hors limites
-    if (_loopIndex > _recentComments.length) _loopIndex = 0;
+    if (_loopIndex >= _recentComments.length) _loopIndex = 0;
     console.log('[TV COMMENTS] removed from loop id:', strId);
   }
 }

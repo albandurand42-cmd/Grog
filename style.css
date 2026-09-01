@@ -807,3 +807,7 @@ h2 { font-size: 1.1rem; margin-bottom: 0.75rem; }
   border-bottom: 1px solid var(--border);
 }
 
+.comments-section-title--tv {
+  margin-top: 1.5rem;
+}
+

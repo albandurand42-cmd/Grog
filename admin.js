@@ -841,6 +841,7 @@ async function moderateComment(id, status) {
   const { error } = await supabase.from('comments').update(updatePayload).eq('id', id);
   if (error) {
     alert('Erreur modération : ' + error.message);
+    return;
   }
   // Le Realtime UPDATE va gérer la mise à jour de l'UI via handleCommentUpdate
 }
