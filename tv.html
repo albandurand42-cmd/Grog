@@ -333,6 +333,15 @@
 
   </div>
 
-  <script type="module" src="tv.js"></script>
+  <script type="module">
+    import { APP_VERSION } from './config.js';
+    (async () => {
+      try {
+        await import(`./tv.js?v=${encodeURIComponent(APP_VERSION)}`);
+      } catch (error) {
+        console.error('[TV] failed to load tv.js', error);
+      }
+    })();
+  </script>
 </body>
 </html>

@@ -4,6 +4,8 @@
 import { supabase } from './supabase.js';
 import { getSyncedLyrics } from './lyrics.js';
 
+console.log('[TV COMMENTS] tv.js comments code loaded');
+
 const coverEl = document.getElementById('tv-cover');
 const coverPlaceholder = document.getElementById('tv-cover-placeholder');
 const titleEl = document.getElementById('tv-title');
@@ -266,14 +268,9 @@ function subscribeRealtime() {
     .subscribe((status) => console.log('[TV] Realtime status:', status));
 }
 
-loadCurrent();
-subscribeRealtime();
-
 // ----- Commentaires TV -----
 
-const commentOverlay = document.getElementById('tv-comment-overlay');
-console.log('[TV COMMENTS] overlay found:', commentOverlay);
-console.log('[TV COMMENTS] DOM overlay:', commentOverlay);
+let commentOverlay = null;
 const _shownCommentIds = new Set();
 let _commentQueue = [];
 let _commentDisplaying = false;
@@ -282,10 +279,10 @@ function enqueueComment(row) {
   if (_shownCommentIds.has(row.id)) return;
   _shownCommentIds.add(row.id);
   _commentQueue.push(row);
-  if (!_commentDisplaying) processCommentQueue();
+  if (!_commentDisplaying) showNextComment();
 }
 
-function processCommentQueue() {
+function showNextComment() {
   if (!_commentQueue.length || !commentOverlay) {
     _commentDisplaying = false;
     return;
@@ -294,7 +291,7 @@ function processCommentQueue() {
   const row = _commentQueue.shift();
   showComment(row, () => {
     // Petite pause entre deux commentaires
-    setTimeout(processCommentQueue, 800);
+    setTimeout(showNextComment, 800);
   });
 }
 
@@ -343,7 +340,7 @@ async function loadRecentApprovedComments() {
   }
 }
 
-function subscribeComments() {
+function subscribeToComments() {
   supabase
     .channel('tv:comments')
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'comments' }, (payload) => {
@@ -357,5 +354,27 @@ function subscribeComments() {
     .subscribe((status) => console.log('[TV] Comments Realtime status:', status));
 }
 
-loadRecentApprovedComments();
-subscribeComments();
+async function initTvComments() {
+  console.log('[TV COMMENTS] init starting');
+
+  commentOverlay = document.getElementById('tv-comment-overlay');
+
+  console.log('[TV COMMENTS] overlay found:', commentOverlay);
+
+  if (!commentOverlay) {
+    console.error('[TV COMMENTS] overlay missing');
+    return;
+  }
+
+  await loadRecentApprovedComments();
+  subscribeToComments();
+
+  console.log('[TV COMMENTS] init complete');
+}
+
+loadCurrent();
+subscribeRealtime();
+// Ne pas attendre : les commentaires doivent démarrer sans bloquer le flux TV principal.
+void initTvComments().catch((error) => {
+  console.error('[TV COMMENTS] init failed', error);
+});
