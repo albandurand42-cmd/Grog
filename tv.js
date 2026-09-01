@@ -272,6 +272,8 @@ subscribeRealtime();
 // ----- Commentaires TV -----
 
 const commentOverlay = document.getElementById('tv-comment-overlay');
+console.log('[TV COMMENTS] overlay found:', commentOverlay);
+console.log('[TV COMMENTS] DOM overlay:', commentOverlay);
 const _shownCommentIds = new Set();
 let _commentQueue = [];
 let _commentDisplaying = false;
@@ -296,21 +298,21 @@ function processCommentQueue() {
   });
 }
 
-function showComment(row, onDone) {
+function showComment(comment, onDone) {
   if (!commentOverlay) { onDone(); return; }
+  console.log('[TV COMMENTS] DISPLAY:', comment);
   // Construire le contenu en utilisant textContent pour éviter XSS
   const bubble = document.createElement('div');
   bubble.className = 'tv-comment-bubble';
   const nameEl = document.createElement('div');
   nameEl.className = 'tv-comment-name';
-  nameEl.textContent = '💬 ' + (row.guest_name || 'Anonyme');
+  nameEl.textContent = '💬 ' + (comment.guest_name || 'Anonyme');
   const textEl = document.createElement('div');
   textEl.className = 'tv-comment-text';
-  textEl.textContent = row.message;
+  textEl.textContent = comment.message;
   bubble.appendChild(nameEl);
   bubble.appendChild(textEl);
-  commentOverlay.innerHTML = '';
-  commentOverlay.appendChild(bubble);
+  commentOverlay.replaceChildren(bubble);
 
   // Apparition
   requestAnimationFrame(() => {
