@@ -369,16 +369,10 @@ function showComment(comment, onDone) {
 async function loadRecentApprovedComments() {
   console.log('[TV COMMENTS] loading approved comments');
   try {
-    const { data, error } = await supabase
-      .from('comments')
-      .select('id, guest_name, message, status, approved_at')
-      .eq('status', 'approved')
-      .order('approved_at', { ascending: false })
-      .limit(MAX_RECENT);
-    console.log('[TV COMMENTS] select result:', { data, error });
-    if (error) throw error;
+    const data = await fetchCurrentTvComments();
+    console.log('[TV COMMENTS] initial load:', data);
     // Remettre dans l'ordre chronologique pour la boucle
-    const rows = (data ?? []).reverse();
+    const rows = [...data].reverse();
     for (const row of rows) addToRecent(row);
     if (_recentComments.length > 0) showNextComment();
   } catch (err) {
@@ -432,6 +426,55 @@ function subscribeToComments() {
     .subscribe((status) => console.log('[TV] Comments Realtime status:', status));
 }
 
+/**
+ * Récupère les 5 derniers commentaires approuvés (source de vérité commune admin + TV).
+ * Utilisé au chargement initial ET pour le polling de sécurité.
+ */
+async function fetchCurrentTvComments() {
+  const { data, error } = await supabase
+    .from('comments')
+    .select('id, guest_name, message, status, approved_at')
+    .eq('status', 'approved')
+    .order('approved_at', { ascending: false })
+    .limit(MAX_RECENT);
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * Synchronise _recentComments avec la liste Supabase sans redémarrer la boucle d'affichage.
+ * Seule la mémoire est mise à jour.
+ */
+function syncRecentComments(freshRows) {
+  // Remettre dans l'ordre chronologique pour la boucle (le plus ancien en premier)
+  const ordered = [...freshRows].reverse();
+  const freshIds = new Set(ordered.map(r => r.id));
+
+  // Retirer les commentaires qui ne sont plus dans les 5 derniers
+  _recentComments = _recentComments.filter(c => freshIds.has(c.id));
+  _pendingPriority = _pendingPriority.filter(c => freshIds.has(c.id));
+
+  // Ajouter les nouveaux sans doublon
+  for (const row of ordered) {
+    if (!_recentComments.some(c => c.id === row.id)) {
+      _recentComments.push(row);
+    }
+  }
+
+  // Respecter MAX_RECENT
+  if (_recentComments.length > MAX_RECENT) {
+    _recentComments = _recentComments.slice(-MAX_RECENT);
+  }
+
+  // Réajuster l'index si nécessaire
+  if (_loopIndex >= _recentComments.length) _loopIndex = 0;
+
+  console.log('[TV COMMENTS] synced recentComments ids:', _recentComments.map(c => c.id));
+}
+
+// Interval de sécurité TV (initialisé une seule fois)
+let _tvCommentsRefreshInterval = null;
+
 async function initTvComments() {
   console.log('[TV COMMENTS] init starting');
 
@@ -446,6 +489,22 @@ async function initTvComments() {
 
   await loadRecentApprovedComments();
   subscribeToComments();
+
+  // Polling de sécurité toutes les 5 secondes : synchronise uniquement la liste mémoire
+  if (!_tvCommentsRefreshInterval) {
+    _tvCommentsRefreshInterval = setInterval(async () => {
+      try {
+        const freshRows = await fetchCurrentTvComments();
+        syncRecentComments(freshRows);
+        // Si la boucle était vide, la démarrer maintenant
+        if (_recentComments.length > 0 && !_commentDisplaying) {
+          showNextComment();
+        }
+      } catch (err) {
+        console.error('[TV COMMENTS] polling refresh error:', err);
+      }
+    }, 5000);
+  }
 
   console.log('[TV COMMENTS] init complete');
 }

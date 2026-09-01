@@ -3,7 +3,7 @@
 
 export const APP_NAME = 'Grog';
 
-export const APP_VERSION = '0.2.5';
+export const APP_VERSION = '0.2.6';
 
 export const SUPABASE_URL =
   'https://yhkcgwyyfgjeudwowgwe.supabase.co';
