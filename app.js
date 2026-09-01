@@ -18,6 +18,12 @@ const volScore = document.getElementById('vol-score');
 const volHint = document.getElementById('vol-hint');
 const nowPlayingDisplay = document.getElementById('now-playing-display');
 
+// Comment DOM
+const commentMessageInput = document.getElementById('comment-message');
+const btnSendComment = document.getElementById('btn-send-comment');
+const commentFeedback = document.getElementById('comment-feedback');
+const commentCharCount = document.getElementById('comment-char-count');
+
 // ----- Recherche Spotify -----
 
 async function handleSearch() {
@@ -250,6 +256,58 @@ searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleSe
 
 volUp.addEventListener('click', () => handleVolClick(1));
 volDown.addEventListener('click', () => handleVolClick(-1));
+
+// ----- Commentaires -----
+
+const COMMENT_MAX = 160;
+const NAME_MAX = 30;
+
+if (commentMessageInput) {
+  commentMessageInput.addEventListener('input', () => {
+    const len = commentMessageInput.value.length;
+    if (commentCharCount) commentCharCount.textContent = len;
+  });
+}
+
+if (btnSendComment) {
+  btnSendComment.addEventListener('click', handleSendComment);
+}
+
+async function handleSendComment() {
+  if (!commentMessageInput) return;
+  const message = commentMessageInput.value.trim().slice(0, COMMENT_MAX);
+  if (!message) {
+    showCommentFeedback('Écris un message avant d\'envoyer 😊', false);
+    return;
+  }
+  const rawName = guestNameInput ? guestNameInput.value.trim() : '';
+  const guest_name = rawName ? rawName.slice(0, NAME_MAX) : null;
+
+  btnSendComment.disabled = true;
+  btnSendComment.textContent = '…';
+  try {
+    const { error } = await supabase
+      .from('comments')
+      .insert({ guest_name, message, status: 'pending' });
+    if (error) throw error;
+    showCommentFeedback('Commentaire envoyé au DJ 👍', true);
+    commentMessageInput.value = '';
+    if (commentCharCount) commentCharCount.textContent = '0';
+  } catch (err) {
+    console.error('Erreur envoi commentaire :', err);
+    showCommentFeedback('Impossible d\'envoyer le commentaire. Réessaie.', false);
+  } finally {
+    btnSendComment.disabled = false;
+    btnSendComment.textContent = 'Envoyer';
+  }
+}
+
+function showCommentFeedback(msg, success) {
+  if (!commentFeedback) return;
+  commentFeedback.textContent = msg;
+  commentFeedback.style.color = success ? 'var(--accent-2)' : '#f87171';
+  setTimeout(() => { commentFeedback.textContent = ''; }, 4000);
+}
 
 loadNowPlaying();
 loadQueue();

@@ -714,3 +714,79 @@ h2 { font-size: 1.1rem; margin-bottom: 0.75rem; }
     min-height: 44px;
   }
 }
+
+/* ===== COMMENTAIRES — PAGE PUBLIQUE ===== */
+.comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.comment-form textarea {
+  width: 100%;
+  background: #0f1520;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+  padding: 0.9rem 1rem;
+  resize: vertical;
+  min-height: 80px;
+  -webkit-appearance: none;
+}
+
+.comment-form textarea::placeholder {
+  color: var(--muted);
+}
+
+.comment-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.comment-char-counter {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+/* ===== COMMENTAIRES — MODÉRATION ADMIN ===== */
+.comment-mod-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 8px;
+}
+
+.comment-mod-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comment-mod-name {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.comment-mod-time {
+  font-size: 0.78rem;
+}
+
+.comment-mod-message {
+  font-size: 0.95rem;
+  color: var(--text);
+  word-break: break-word;
+  margin: 0;
+}
+
+.comment-mod-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
