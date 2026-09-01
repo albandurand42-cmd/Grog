@@ -325,14 +325,15 @@ function showComment(row, onDone) {
 }
 
 async function loadRecentApprovedComments() {
+  console.log('[TV COMMENTS] loading approved comments');
   try {
-    const since = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5 dernières minutes
     const { data, error } = await supabase
       .from('comments')
-      .select('id, guest_name, message')
+      .select('id, guest_name, message, status, approved_at')
       .eq('status', 'approved')
-      .gte('approved_at', since)
-      .order('approved_at', { ascending: true });
+      .order('approved_at', { ascending: true })
+      .limit(10);
+    console.log('[TV COMMENTS] select result:', { data, error });
     if (error) throw error;
     for (const row of (data ?? [])) enqueueComment(row);
   } catch (err) {
@@ -344,8 +345,12 @@ function subscribeComments() {
   supabase
     .channel('tv:comments')
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'comments' }, (payload) => {
+      console.log('[TV COMMENTS] realtime payload:', payload);
       const row = payload.new;
-      if (row?.status === 'approved') enqueueComment(row);
+      if (row?.status === 'approved') {
+        console.log('[TV COMMENTS] approved comment:', row);
+        enqueueComment(row);
+      }
     })
     .subscribe((status) => console.log('[TV] Comments Realtime status:', status));
 }
