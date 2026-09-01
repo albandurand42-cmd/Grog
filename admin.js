@@ -716,11 +716,13 @@ const commentsList = document.getElementById('comments-list');
 async function loadPendingComments() {
   if (!commentsList) return;
   try {
+    console.log('[COMMENTS ADMIN] loading pending comments');
     const { data, error } = await supabase
       .from('comments')
-      .select('id, guest_name, message, created_at')
+      .select('*')
       .eq('status', 'pending')
       .order('created_at', { ascending: true });
+    console.log('[COMMENTS ADMIN] result:', { data, error });
     if (error) throw error;
     renderComments(data ?? []);
   } catch (err) {
@@ -736,7 +738,13 @@ function renderComments(rows) {
     commentsList.innerHTML = '<div class="empty-state">Aucun commentaire en attente.</div>';
     return;
   }
-  for (const row of rows) commentsList.appendChild(buildCommentCard(row));
+  const seenIds = new Set();
+  for (const row of rows) {
+    const rowId = String(row.id ?? '');
+    if (!rowId || seenIds.has(rowId)) continue;
+    seenIds.add(rowId);
+    commentsList.appendChild(buildCommentCard(row));
+  }
 }
 
 function buildCommentCard(row) {
@@ -783,6 +791,9 @@ function subscribeToComments() {
     .channel('admin:comments')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments' }, (payload) => {
       if (payload.new?.status === 'pending') {
+        const commentId = String(payload.new.id ?? '');
+        const alreadyRendered = !!commentsList && [...commentsList.querySelectorAll('.comment-mod-card')].some((el) => el.dataset.id === commentId);
+        if (!commentId || alreadyRendered) return;
         // Ajouter la carte directement sans rechargement complet
         if (commentsList) {
           const emptyState = commentsList.querySelector('.empty-state');
