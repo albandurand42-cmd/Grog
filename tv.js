@@ -268,3 +268,87 @@ function subscribeRealtime() {
 
 loadCurrent();
 subscribeRealtime();
+
+// ----- Commentaires TV -----
+
+const commentOverlay = document.getElementById('tv-comment-overlay');
+const _shownCommentIds = new Set();
+let _commentQueue = [];
+let _commentDisplaying = false;
+
+function enqueueComment(row) {
+  if (_shownCommentIds.has(row.id)) return;
+  _shownCommentIds.add(row.id);
+  _commentQueue.push(row);
+  if (!_commentDisplaying) processCommentQueue();
+}
+
+function processCommentQueue() {
+  if (!_commentQueue.length || !commentOverlay) {
+    _commentDisplaying = false;
+    return;
+  }
+  _commentDisplaying = true;
+  const row = _commentQueue.shift();
+  showComment(row, () => {
+    // Petite pause entre deux commentaires
+    setTimeout(processCommentQueue, 800);
+  });
+}
+
+function showComment(row, onDone) {
+  if (!commentOverlay) { onDone(); return; }
+  // Construire le contenu en utilisant textContent pour éviter XSS
+  const bubble = document.createElement('div');
+  bubble.className = 'tv-comment-bubble';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'tv-comment-name';
+  nameEl.textContent = '💬 ' + (row.guest_name || 'Anonyme');
+  const textEl = document.createElement('div');
+  textEl.className = 'tv-comment-text';
+  textEl.textContent = row.message;
+  bubble.appendChild(nameEl);
+  bubble.appendChild(textEl);
+  commentOverlay.innerHTML = '';
+  commentOverlay.appendChild(bubble);
+
+  // Apparition
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => { commentOverlay.classList.add('visible'); });
+  });
+
+  // Disparition après 6 s
+  setTimeout(() => {
+    commentOverlay.classList.remove('visible');
+    setTimeout(onDone, 300); // attendre la transition de sortie
+  }, 6000);
+}
+
+async function loadRecentApprovedComments() {
+  try {
+    const since = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5 dernières minutes
+    const { data, error } = await supabase
+      .from('comments')
+      .select('id, guest_name, message')
+      .eq('status', 'approved')
+      .gte('approved_at', since)
+      .order('approved_at', { ascending: true });
+    if (error) throw error;
+    for (const row of (data ?? [])) enqueueComment(row);
+  } catch (err) {
+    console.error('[TV] erreur chargement commentaires récents :', err);
+  }
+}
+
+function subscribeComments() {
+  supabase
+    .channel('tv:comments')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'comments' }, (payload) => {
+      const row = payload.new;
+      if (row?.status === 'approved') enqueueComment(row);
+    })
+    .subscribe((status) => console.log('[TV] Comments Realtime status:', status));
+}
+
+loadRecentApprovedComments();
+subscribeComments();

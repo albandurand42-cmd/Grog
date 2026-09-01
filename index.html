@@ -63,7 +63,22 @@
           <button id="vol-up" type="button" class="vol-btn vol-btn-plus" aria-label="Monter le volume">+1</button>
         </div>
       </section>
-    </main>
+
+      <!-- Commentaires -->
+      <section class="card" aria-labelledby="comment-title">
+        <h2 id="comment-title">💬 Laisser un commentaire</h2>
+        <div class="comment-form">
+          <textarea
+            id="comment-message"
+            placeholder="Un message pour la soirée..."
+            maxlength="160"
+            rows="3"
+          ></textarea>
+          <div class="comment-char-counter"><span id="comment-char-count">0</span> / 160</div>
+          <button id="btn-send-comment" type="button" class="primary">Envoyer</button>
+          <p id="comment-feedback" class="muted" aria-live="polite"></p>
+        </div>
+      </section>
 
     <script type="module" src="app.js"></script>
   </body>

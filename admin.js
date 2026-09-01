@@ -708,3 +708,91 @@ if (btnClearInstruction) {
     }
   });
 }
+
+// ----- Commentaires (modération) -----
+
+const commentsList = document.getElementById('comments-list');
+
+async function loadPendingComments() {
+  if (!commentsList) return;
+  try {
+    const { data, error } = await supabase
+      .from('comments')
+      .select('id, guest_name, message, created_at')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    renderComments(data ?? []);
+  } catch (err) {
+    console.error('Erreur chargement commentaires :', err);
+    if (commentsList) commentsList.innerHTML = '<div class="empty-state error-state">Impossible de charger les commentaires.</div>';
+  }
+}
+
+function renderComments(rows) {
+  if (!commentsList) return;
+  commentsList.innerHTML = '';
+  if (!rows.length) {
+    commentsList.innerHTML = '<div class="empty-state">Aucun commentaire en attente.</div>';
+    return;
+  }
+  for (const row of rows) commentsList.appendChild(buildCommentCard(row));
+}
+
+function buildCommentCard(row) {
+  const article = document.createElement('article');
+  article.className = 'comment-mod-card';
+  article.dataset.id = row.id;
+  const time = new Date(row.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  article.innerHTML = `
+    <div class="comment-mod-meta">
+      <strong class="comment-mod-name"></strong>
+      <span class="muted comment-mod-time"></span>
+    </div>
+    <p class="comment-mod-message"></p>
+    <div class="comment-mod-actions">
+      <button type="button" class="badge-accept" data-action="approve" title="Afficher sur la TV">✓ Afficher</button>
+      <button type="button" class="badge-reject" data-action="reject" title="Refuser">✕ Refuser</button>
+    </div>
+  `;
+  // Utiliser textContent pour éviter toute injection XSS
+  article.querySelector('.comment-mod-name').textContent = row.guest_name || 'Anonyme';
+  article.querySelector('.comment-mod-time').textContent = time;
+  article.querySelector('.comment-mod-message').textContent = row.message;
+  article.querySelector('[data-action="approve"]').addEventListener('click', () => moderateComment(row.id, 'approved', article));
+  article.querySelector('[data-action="reject"]').addEventListener('click', () => moderateComment(row.id, 'rejected', article));
+  return article;
+}
+
+async function moderateComment(id, status, articleEl) {
+  const updatePayload = { status };
+  if (status === 'approved') updatePayload.approved_at = new Date().toISOString();
+  const { error } = await supabase.from('comments').update(updatePayload).eq('id', id);
+  if (error) {
+    alert('Erreur modération : ' + error.message);
+    return;
+  }
+  articleEl.remove();
+  if (!commentsList.querySelector('.comment-mod-card')) {
+    commentsList.innerHTML = '<div class="empty-state">Aucun commentaire en attente.</div>';
+  }
+}
+
+function subscribeToComments() {
+  supabase
+    .channel('admin:comments')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments' }, (payload) => {
+      if (payload.new?.status === 'pending') {
+        // Ajouter la carte directement sans rechargement complet
+        if (commentsList) {
+          const emptyState = commentsList.querySelector('.empty-state');
+          if (emptyState) emptyState.remove();
+          commentsList.appendChild(buildCommentCard(payload.new));
+        }
+      }
+    })
+    .subscribe();
+}
+
+loadPendingComments();
+subscribeToComments();
