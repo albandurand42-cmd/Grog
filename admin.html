@@ -138,8 +138,15 @@
       <!-- Commentaires -->
       <section class="card" aria-labelledby="comments-title">
         <h2 id="comments-title">💬 Commentaires</h2>
-        <div id="comments-list" role="region" aria-live="polite" aria-label="Commentaires en attente">
+
+        <h3 class="comments-section-title">EN ATTENTE</h3>
+        <div id="comments-pending-list" role="region" aria-live="polite" aria-label="Commentaires en attente">
           <div class="empty-state">Aucun commentaire en attente.</div>
+        </div>
+
+        <h3 class="comments-section-title" style="margin-top:1.5rem;">ACTUELLEMENT SUR LA TV</h3>
+        <div id="comments-approved-list" role="region" aria-live="polite" aria-label="Commentaires diffusés sur la TV">
+          <div class="empty-state">Aucun commentaire diffusé pour le moment.</div>
         </div>
       </section>
 

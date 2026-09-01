@@ -339,6 +339,8 @@ function showNextComment() {
 function showComment(comment, onDone) {
   if (!commentOverlay) { onDone(); return; }
   console.log('[TV COMMENTS] DISPLAY:', comment);
+  // Stocker l'id du commentaire affiché pour permettre le retrait immédiat
+  commentOverlay.dataset.currentId = String(comment.id ?? '');
   // Construire le contenu en utilisant textContent pour éviter XSS
   const bubble = document.createElement('div');
   bubble.className = 'tv-comment-bubble';
@@ -384,15 +386,47 @@ async function loadRecentApprovedComments() {
   }
 }
 
+/**
+ * Retire un commentaire de toutes les listes locales TV.
+ * Si ce commentaire est actuellement affiché, masque l'overlay et passe au suivant.
+ */
+function removeFromTv(id) {
+  const strId = String(id);
+  const beforeLen = _recentComments.length;
+  _recentComments = _recentComments.filter(c => String(c.id) !== strId);
+  _pendingPriority = _pendingPriority.filter(c => String(c.id) !== strId);
+  if (_recentComments.length < beforeLen) {
+    // Réajuster l'index de boucle pour éviter un saut hors limites
+    if (_loopIndex > _recentComments.length) _loopIndex = 0;
+    console.log('[TV COMMENTS] removed from loop id:', strId);
+  }
+}
+
 function subscribeToComments() {
   supabase
     .channel('tv:comments')
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'comments' }, (payload) => {
       console.log('[TV COMMENTS] realtime payload:', payload);
       const row = payload.new;
-      if (row?.status === 'approved') {
+      if (!row) return;
+      if (row.status === 'approved') {
         console.log('[TV COMMENTS] approved comment:', row);
         enqueueComment(row, { priority: true });
+      } else {
+        // Commentaire retiré (rejected/removed) : le sortir immédiatement de la TV
+        removeFromTv(row.id);
+        // Si l'overlay affiche ce commentaire, masquer immédiatement et passer au suivant
+        if (commentOverlay) {
+          const visibleBubble = commentOverlay.querySelector('.tv-comment-bubble');
+          if (visibleBubble) {
+            const overlayDataId = commentOverlay.dataset && commentOverlay.dataset.currentId;
+            if (overlayDataId === String(row.id)) {
+              commentOverlay.classList.remove('visible');
+              _commentDisplaying = false;
+              setTimeout(showNextComment, 300);
+            }
+          }
+        }
       }
     })
     .subscribe((status) => console.log('[TV] Comments Realtime status:', status));
