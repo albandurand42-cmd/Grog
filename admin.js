@@ -743,12 +743,11 @@ function buildCommentCard(row) {
   const article = document.createElement('article');
   article.className = 'comment-mod-card';
   article.dataset.id = row.id;
-  const name = row.guest_name ? escHtml(row.guest_name) : '<em>Anonyme</em>';
   const time = new Date(row.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   article.innerHTML = `
     <div class="comment-mod-meta">
-      <strong class="comment-mod-name">${name}</strong>
-      <span class="muted comment-mod-time">${time}</span>
+      <strong class="comment-mod-name"></strong>
+      <span class="muted comment-mod-time"></span>
     </div>
     <p class="comment-mod-message"></p>
     <div class="comment-mod-actions">
@@ -757,6 +756,8 @@ function buildCommentCard(row) {
     </div>
   `;
   // Utiliser textContent pour éviter toute injection XSS
+  article.querySelector('.comment-mod-name').textContent = row.guest_name || 'Anonyme';
+  article.querySelector('.comment-mod-time').textContent = time;
   article.querySelector('.comment-mod-message').textContent = row.message;
   article.querySelector('[data-action="approve"]').addEventListener('click', () => moderateComment(row.id, 'approved', article));
   article.querySelector('[data-action="reject"]').addEventListener('click', () => moderateComment(row.id, 'rejected', article));
@@ -786,7 +787,7 @@ function subscribeToComments() {
         if (commentsList) {
           const emptyState = commentsList.querySelector('.empty-state');
           if (emptyState) emptyState.remove();
-          commentsList.insertBefore(buildCommentCard(payload.new), commentsList.firstChild);
+          commentsList.appendChild(buildCommentCard(payload.new));
         }
       }
     })
