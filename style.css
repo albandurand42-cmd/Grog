@@ -790,3 +790,24 @@ h2 { font-size: 1.1rem; margin-bottom: 0.75rem; }
   margin-top: 4px;
   flex-wrap: wrap;
 }
+
+.comment-mod-card--approved {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.comments-section-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #888);
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.comments-section-title--tv {
+  margin-top: 1.5rem;
+}
+

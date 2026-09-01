@@ -711,43 +711,81 @@ if (btnClearInstruction) {
 
 // ----- Commentaires (modération) -----
 
-const commentsList = document.getElementById('comments-list');
+const commentsPendingList = document.getElementById('comments-pending-list');
+const commentsApprovedList = document.getElementById('comments-approved-list');
 
-async function loadPendingComments() {
-  if (!commentsList) return;
+// State Maps: id (string) → row object
+const _pendingComments = new Map();
+const _approvedComments = new Map();
+
+// ----- Chargement initial -----
+
+async function loadCommentsAdmin() {
   try {
     console.log('[COMMENTS ADMIN] loading pending comments');
-    const { data, error } = await supabase
+    const { data: pendingData, error: pendingErr } = await supabase
       .from('comments')
       .select('*')
       .eq('status', 'pending')
       .order('created_at', { ascending: true });
-    console.log('[COMMENTS ADMIN] result:', { data, error });
-    if (error) throw error;
-    renderComments(data ?? []);
+    console.log('[COMMENTS ADMIN] pending result:', { data: pendingData, error: pendingErr });
+    if (pendingErr) throw pendingErr;
+    _pendingComments.clear();
+    for (const row of (pendingData ?? [])) _pendingComments.set(String(row.id), row);
   } catch (err) {
-    console.error('Erreur chargement commentaires :', err);
-    if (commentsList) commentsList.innerHTML = '<div class="empty-state error-state">Impossible de charger les commentaires.</div>';
+    console.error('[COMMENTS ADMIN] erreur chargement pending :', err);
+    if (commentsPendingList) commentsPendingList.innerHTML = '<div class="empty-state error-state">Impossible de charger les commentaires.</div>';
   }
+
+  try {
+    const { data: approvedData, error: approvedErr } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('status', 'approved')
+      .order('approved_at', { ascending: false })
+      .limit(5);
+    if (approvedErr) throw approvedErr;
+    _approvedComments.clear();
+    for (const row of (approvedData ?? [])) _approvedComments.set(String(row.id), row);
+  } catch (err) {
+    console.error('[COMMENTS ADMIN] erreur chargement approved :', err);
+  }
+
+  renderPendingComments();
+  renderApprovedComments();
 }
 
-function renderComments(rows) {
-  if (!commentsList) return;
-  commentsList.innerHTML = '';
-  if (!rows.length) {
-    commentsList.innerHTML = '<div class="empty-state">Aucun commentaire en attente.</div>';
+// ----- Rendus -----
+
+function renderPendingComments() {
+  if (!commentsPendingList) return;
+  commentsPendingList.innerHTML = '';
+  if (_pendingComments.size === 0) {
+    commentsPendingList.innerHTML = '<div class="empty-state">Aucun commentaire en attente.</div>';
     return;
   }
-  const seenIds = new Set();
-  for (const row of rows) {
-    const rowId = String(row.id ?? '');
-    if (!rowId || seenIds.has(rowId)) continue;
-    seenIds.add(rowId);
-    commentsList.appendChild(buildCommentCard(row));
+  for (const row of _pendingComments.values()) {
+    commentsPendingList.appendChild(buildPendingCard(row));
   }
 }
 
-function buildCommentCard(row) {
+function renderApprovedComments() {
+  if (!commentsApprovedList) return;
+  commentsApprovedList.innerHTML = '';
+  if (_approvedComments.size === 0) {
+    commentsApprovedList.innerHTML = '<div class="empty-state">Aucun commentaire diffusé pour le moment.</div>';
+    return;
+  }
+  // Trier par approved_at DESC, max 5
+  const sorted = [..._approvedComments.values()]
+    .sort((a, b) => new Date(b.approved_at ?? 0) - new Date(a.approved_at ?? 0))
+    .slice(0, 5);
+  for (const row of sorted) {
+    commentsApprovedList.appendChild(buildApprovedCard(row));
+  }
+}
+
+function buildPendingCard(row) {
   const article = document.createElement('article');
   article.className = 'comment-mod-card';
   article.dataset.id = row.id;
@@ -763,16 +801,41 @@ function buildCommentCard(row) {
       <button type="button" class="badge-reject" data-action="reject" title="Refuser">✕ Refuser</button>
     </div>
   `;
-  // Utiliser textContent pour éviter toute injection XSS
   article.querySelector('.comment-mod-name').textContent = row.guest_name || 'Anonyme';
   article.querySelector('.comment-mod-time').textContent = time;
   article.querySelector('.comment-mod-message').textContent = row.message;
-  article.querySelector('[data-action="approve"]').addEventListener('click', () => moderateComment(row.id, 'approved', article));
-  article.querySelector('[data-action="reject"]').addEventListener('click', () => moderateComment(row.id, 'rejected', article));
+  article.querySelector('[data-action="approve"]').addEventListener('click', () => moderateComment(row.id, 'approved'));
+  article.querySelector('[data-action="reject"]').addEventListener('click', () => moderateComment(row.id, 'rejected'));
   return article;
 }
 
-async function moderateComment(id, status, articleEl) {
+function buildApprovedCard(row) {
+  const article = document.createElement('article');
+  article.className = 'comment-mod-card comment-mod-card--approved';
+  article.dataset.id = row.id;
+  const time = row.approved_at
+    ? new Date(row.approved_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    : '';
+  article.innerHTML = `
+    <div class="comment-mod-meta">
+      <strong class="comment-mod-name"></strong>
+      <span class="muted comment-mod-time"></span>
+    </div>
+    <p class="comment-mod-message"></p>
+    <div class="comment-mod-actions">
+      <button type="button" class="badge-reject" data-action="remove" title="Retirer de la TV">✕ Retirer</button>
+    </div>
+  `;
+  article.querySelector('.comment-mod-name').textContent = row.guest_name || 'Anonyme';
+  article.querySelector('.comment-mod-time').textContent = time;
+  article.querySelector('.comment-mod-message').textContent = row.message;
+  article.querySelector('[data-action="remove"]').addEventListener('click', () => moderateComment(row.id, 'rejected'));
+  return article;
+}
+
+// ----- Modération -----
+
+async function moderateComment(id, status) {
   const updatePayload = { status };
   if (status === 'approved') updatePayload.approved_at = new Date().toISOString();
   const { error } = await supabase.from('comments').update(updatePayload).eq('id', id);
@@ -780,30 +843,58 @@ async function moderateComment(id, status, articleEl) {
     alert('Erreur modération : ' + error.message);
     return;
   }
-  articleEl.remove();
-  if (!commentsList.querySelector('.comment-mod-card')) {
-    commentsList.innerHTML = '<div class="empty-state">Aucun commentaire en attente.</div>';
+  // Le Realtime UPDATE va gérer la mise à jour de l'UI via handleCommentUpdate
+}
+
+// ----- Realtime -----
+
+function handleCommentInsert(row) {
+  if (row?.status === 'pending') {
+    const key = String(row.id);
+    if (_pendingComments.has(key)) return; // anti-doublon
+    _pendingComments.set(key, row);
+    renderPendingComments();
   }
+}
+
+function handleCommentUpdate(row) {
+  const key = String(row.id);
+  const prevPending = _pendingComments.has(key);
+  const prevApproved = _approvedComments.has(key);
+
+  // Mettre à jour les maps selon le nouveau statut
+  _pendingComments.delete(key);
+  _approvedComments.delete(key);
+
+  if (row.status === 'approved') {
+    _approvedComments.set(key, row);
+    // Garder max 5 : supprimer les plus anciens si nécessaire
+    if (_approvedComments.size > 5) {
+      const sorted = [..._approvedComments.entries()]
+        .sort((a, b) => new Date(b[1].approved_at ?? 0) - new Date(a[1].approved_at ?? 0));
+      const toRemove = sorted.slice(5);
+      for (const [k] of toRemove) _approvedComments.delete(k);
+    }
+  }
+  // Pour pending→rejected et approved→rejected : déjà supprimé des maps, rien à ajouter
+
+  renderPendingComments();
+  renderApprovedComments();
 }
 
 function subscribeToComments() {
   supabase
     .channel('admin:comments')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments' }, (payload) => {
-      if (payload.new?.status === 'pending') {
-        const commentId = String(payload.new.id ?? '');
-        const alreadyRendered = !!commentsList && [...commentsList.querySelectorAll('.comment-mod-card')].some((el) => el.dataset.id === commentId);
-        if (!commentId || alreadyRendered) return;
-        // Ajouter la carte directement sans rechargement complet
-        if (commentsList) {
-          const emptyState = commentsList.querySelector('.empty-state');
-          if (emptyState) emptyState.remove();
-          commentsList.appendChild(buildCommentCard(payload.new));
-        }
-      }
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, (payload) => {
+      console.log('[COMMENTS ADMIN] realtime status:', 'event received');
+      console.log('[COMMENTS ADMIN] realtime payload:', payload);
+      if (payload.eventType === 'INSERT') handleCommentInsert(payload.new);
+      else if (payload.eventType === 'UPDATE') handleCommentUpdate(payload.new);
     })
-    .subscribe();
+    .subscribe((status) => {
+      console.log('[COMMENTS ADMIN] realtime status:', status);
+    });
 }
 
-loadPendingComments();
+loadCommentsAdmin();
 subscribeToComments();
