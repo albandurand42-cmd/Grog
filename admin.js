@@ -884,3 +884,12 @@ function subscribeToComments() {
 
 loadCommentsAdmin();
 subscribeToComments();
+
+// Polling de sécurité toutes les 5 secondes (filet de sécurité si un event Realtime est raté)
+let _commentsRefreshInterval = null;
+if (!_commentsRefreshInterval) {
+  _commentsRefreshInterval = setInterval(async () => {
+    try { await loadPendingComments(); } catch (err) { console.error('[COMMENTS ADMIN] polling pending:', err); }
+    try { await loadApprovedComments(); } catch (err) { console.error('[COMMENTS ADMIN] polling approved:', err); }
+  }, 5000);
+}
