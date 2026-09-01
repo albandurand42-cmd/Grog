@@ -333,6 +333,9 @@
 
   </div>
 
-  <script type="module" src="tv.js?v=0.2.2"></script>
+  <script type="module">
+    import { APP_VERSION } from './config.js';
+    import(`./tv.js?v=${encodeURIComponent(APP_VERSION)}`);
+  </script>
 </body>
 </html>
