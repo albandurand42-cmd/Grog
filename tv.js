@@ -372,6 +372,8 @@ async function initTvComments() {
   console.log('[TV COMMENTS] init complete');
 }
 
-initTvComments();
+initTvComments().catch((error) => {
+  console.error('[TV COMMENTS] init failed', error);
+});
 loadCurrent();
 subscribeRealtime();
