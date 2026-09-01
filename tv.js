@@ -372,7 +372,8 @@ async function initTvComments() {
   console.log('[TV COMMENTS] init complete');
 }
 
-initTvComments().catch((error) => {
+// Ne pas attendre : les commentaires doivent démarrer sans bloquer le flux TV principal.
+void initTvComments().catch((error) => {
   console.error('[TV COMMENTS] init failed', error);
 });
 loadCurrent();
