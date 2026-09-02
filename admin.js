@@ -614,11 +614,22 @@ async function queueRequestOnSpotify(row, articleEl) {
 
     await addToSpotifyQueue(row, spotifyFetch);
     spotifyAdded = true;
+    console.log('[REQUEST QUEUE] spotify success', row.id);
 
-    const { error } = await supabase.from('song_requests').update({ status: 'queued' }).eq('id', row.id);
+    const { data, error } = await supabase
+      .from('song_requests')
+      .update({ status: 'queued' })
+      .eq('id', row.id)
+      .select();
+    console.log('[REQUEST QUEUE] DB update', {
+      id: row.id,
+      data,
+      error,
+    });
     if (error) throw error;
 
-    await loadRequests();
+    articleEl.remove();
+    if (!requestsList.querySelector('.request-card')) requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
   } catch (error) {
     if (spotifyAdded) {
       console.error('[QUEUE ADMIN] Spotify ajouté mais update song_requests échoué', error);
