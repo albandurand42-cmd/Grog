@@ -58,7 +58,12 @@ export async function startPKCE() {
     scope: SCOPES,
   });
 
-  window.location.href = 'https://accounts.spotify.com/authorize?' + params;
+  const authorizeUrl = 'https://accounts.spotify.com/authorize?' + params;
+  console.log('[SPOTIFY AUTH] authorize scope:', {
+    scope: SCOPES,
+    hasUserModifyPlaybackState: SCOPES.split(' ').includes('user-modify-playback-state'),
+  });
+  window.location.href = authorizeUrl;
 }
 
 /**
