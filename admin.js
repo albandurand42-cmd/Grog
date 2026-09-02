@@ -354,8 +354,16 @@ btnLogout.addEventListener('click', () => {
   resetNowPlayingUI();
 });
 
-async function spotifyFetch(url) {
-  let res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+async function spotifyFetch(url, init = {}) {
+  const withAuth = (token) => ({
+    ...init,
+    headers: {
+      ...(init.headers ?? {}),
+      Authorization: 'Bearer ' + token,
+    },
+  });
+
+  let res = await fetch(url, withAuth(accessToken));
   if (res.status === 401) {
     const newToken = await refreshAccessToken();
     if (!newToken) {
@@ -366,7 +374,7 @@ async function spotifyFetch(url) {
       return null;
     }
     accessToken = newToken;
-    res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+    res = await fetch(url, withAuth(accessToken));
   }
   return res;
 }
@@ -575,12 +583,10 @@ function buildRequestItem(row) {
       ${nameHtml}
     </div>
     <span class="vote-count">${row.request_count ?? 1}×</span>
-    <button type="button" class="badge-play" data-action="play" title="Mettre en lecture">▶</button>
-    <button type="button" class="badge-accept" data-action="accept" title="Marquer comme joué">✓</button>
-    <button type="button" class="badge-reject" data-action="reject" title="Refuser">✕</button>
+    <button type="button" class="badge-accept" data-action="queue" title="Ajouter à la file Spotify">+ Mettre en attente</button>
+    <button type="button" class="badge-reject" data-action="reject" title="Refuser">✕ Refuser</button>
   `;
-  article.querySelector('[data-action="play"]').addEventListener('click', () => setNowPlayingManual(row, article));
-  article.querySelector('[data-action="accept"]').addEventListener('click', () => updateStatus(row.id, 'played', article));
+  article.querySelector('[data-action="queue"]').addEventListener('click', () => queueRequestOnSpotify(row, article));
   article.querySelector('[data-action="reject"]').addEventListener('click', () => updateStatus(row.id, 'rejected', article));
   return article;
 }
@@ -595,34 +601,60 @@ async function updateStatus(id, status, articleEl) {
   if (!requestsList.querySelector('.request-card')) requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
 }
 
-async function setNowPlayingManual(row, articleEl) {
-  const btn = articleEl.querySelector('[data-action="play"]');
+async function queueRequestOnSpotify(row, articleEl) {
+  const btn = articleEl.querySelector('[data-action="queue"]');
+  if (!btn || btn.disabled) return;
   btn.disabled = true;
-  try {
-    await supabase.from('now_playing').delete().not('id', 'is', null);
-    const { data, error } = await supabase.from('now_playing').insert({
-      spotify_track_id: row.spotify_id ?? null,
-      title: row.title,
-      artist: row.artist,
-      album: row.album ?? null,
-      image_url: row.album_art ?? null,
-      started_at: new Date().toISOString(),
-      duration_ms: null,
-      progress_ms: 0,
-      is_playing: true,
-      synced_at: new Date().toISOString(),
-    }).select();
-    if (error) throw error;
-    console.log('[now_playing] Écriture manuelle OK :', data);
-    _lastSyncedTrackId = row.spotify_id ?? null;
-    _lastSyncedIsPlaying = true;
-    _lastPeriodicWrite = Date.now();
-    btn.textContent = '▶️';
-    setTimeout(() => { btn.textContent = '▶'; btn.disabled = false; }, 2000);
-  } catch (err) {
-    console.error('Erreur now_playing :', err);
+
+  const trackUri = row.spotify_id ? `spotify:track:${row.spotify_id}` : '';
+  if (!trackUri) {
+    console.error('[REQUESTS] Impossible de construire l’URI Spotify', { requestId: row.id, row });
+    alert('Impossible d’ajouter à la file Spotify');
     btn.disabled = false;
-    alert('Impossible de mettre à jour le morceau en cours.');
+    return;
+  }
+
+  try {
+    if (!accessToken) {
+      throw new Error('Connexion Spotify nécessaire');
+    }
+
+    const queueUrl = `https://api.spotify.com/v1/me/player/queue?${new URLSearchParams({ uri: trackUri }).toString()}`;
+    const res = await spotifyFetch(queueUrl, { method: 'POST' });
+    if (!res) throw new Error('Connexion Spotify nécessaire');
+
+    if (!res.ok) {
+      let detail = '';
+      try {
+        detail = await res.text();
+      } catch {
+        // ignore read error
+      }
+      console.error('[REQUESTS] Spotify queue error', {
+        requestId: row.id,
+        trackUri,
+        status: res.status,
+        body: detail,
+      });
+      if (res.status === 404) throw new Error('Aucun lecteur Spotify actif');
+      throw new Error('Impossible d’ajouter à la file Spotify');
+    }
+
+    const { error } = await supabase.from('song_requests').update({ status: 'queued' }).eq('id', row.id);
+    if (error) throw error;
+
+    articleEl.remove();
+    if (!requestsList.querySelector('.request-card')) {
+      requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
+    }
+  } catch (err) {
+    const message = err?.message === 'Aucun lecteur Spotify actif'
+      ? 'Aucun lecteur Spotify actif'
+      : 'Impossible d’ajouter à la file Spotify';
+    console.error('[REQUESTS] Erreur ajout file Spotify', { requestId: row.id, trackUri, error: err });
+    alert(message);
+  } finally {
+    btn.disabled = false;
   }
 }
 
