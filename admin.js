@@ -573,7 +573,7 @@ function renderRequests(rows) {
 function buildRequestItem(row) {
   const article = document.createElement('article');
   article.className = 'request-card';
-  article.dataset.id = row.id;
+  article.dataset.requestId = String(row.id);
   const nameHtml = row.guest_name ? `<span class="muted guest-name">Demandé par ${escHtml(row.guest_name)}</span>` : `<span class="muted guest-name">Anonyme</span>`;
   article.innerHTML = `
     ${row.album_art ? `<img class="cover" src="${escHtml(row.album_art)}" alt="pochette" width="56" height="56" loading="lazy">` : '<div class="cover placeholder" aria-hidden="true"></div>'}
@@ -591,14 +591,19 @@ function buildRequestItem(row) {
   return article;
 }
 
+function removeRequestCard(requestId, fallbackEl) {
+  const card = requestsList.querySelector(`.request-card[data-request-id="${String(requestId)}"]`) || fallbackEl;
+  if (card) card.remove();
+  if (!requestsList.querySelector('.request-card')) requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
+}
+
 async function updateStatus(id, status, articleEl) {
   const { error } = await supabase.from('song_requests').update({ status }).eq('id', id);
   if (error) {
-    alert('Erreur mise à jour : ' + error.message);
+    console.error('[REQUEST ADMIN] update failed:', error);
     return;
   }
-  articleEl.remove();
-  if (!requestsList.querySelector('.request-card')) requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
+  removeRequestCard(id, articleEl);
 }
 
 async function queueRequestOnSpotify(row, articleEl) {
@@ -618,7 +623,7 @@ async function queueRequestOnSpotify(row, articleEl) {
     const { error } = await supabase.from('song_requests').update({ status: 'queued' }).eq('id', row.id);
     if (error) throw error;
 
-    await loadRequests();
+    removeRequestCard(row.id, articleEl);
   } catch (error) {
     if (spotifyAdded) {
       console.error('[QUEUE ADMIN] Spotify ajouté mais update song_requests échoué', error);
