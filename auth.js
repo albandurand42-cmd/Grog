@@ -4,6 +4,8 @@
 import { SPOTIFY_CLIENT_ID } from './config.js';
 
 const REDIRECT_URI = window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '/admin.html');
+const PKCE_VERIFIER_KEY = 'pkce_verifier';
+const SPOTIFY_TOKEN_KEY = 'spotify_token';
 const SCOPES = [
   'user-read-playback-state',
   'user-modify-playback-state',
@@ -38,6 +40,20 @@ async function generateCodeChallenge(verifier) {
   return base64UrlEncode(new Uint8Array(hash));
 }
 
+function setPkceVerifier(verifier) {
+  sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+  localStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+}
+
+function getPkceVerifier() {
+  return sessionStorage.getItem(PKCE_VERIFIER_KEY) || localStorage.getItem(PKCE_VERIFIER_KEY);
+}
+
+function clearPkceVerifier() {
+  sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+  localStorage.removeItem(PKCE_VERIFIER_KEY);
+}
+
 // ----- Public API -----
 
 /**
@@ -47,7 +63,7 @@ async function generateCodeChallenge(verifier) {
 export async function startPKCE() {
   const verifier = generateCodeVerifier();
   const challenge = await generateCodeChallenge(verifier);
-  sessionStorage.setItem('pkce_verifier', verifier);
+  setPkceVerifier(verifier);
 
   const params = new URLSearchParams({
     client_id: SPOTIFY_CLIENT_ID,
@@ -59,6 +75,7 @@ export async function startPKCE() {
   });
 
   const authorizeUrl = 'https://accounts.spotify.com/authorize?' + params;
+  console.log('[AUTH] authorize URL:', authorizeUrl);
   console.log('[SPOTIFY AUTH] authorize scope:', {
     scope: SCOPES,
     hasUserModifyPlaybackState: SCOPES.split(' ').includes('user-modify-playback-state'),
@@ -74,10 +91,25 @@ export async function startPKCE() {
 export async function handleCallback() {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
+  const error = params.get('error');
+  const errorDescription = params.get('error_description');
+  if (error) {
+    console.error('[AUTH] Spotify callback error:', { error, errorDescription, redirectUri: REDIRECT_URI });
+    clearPkceVerifier();
+    window.history.replaceState({}, document.title, window.location.pathname);
+    return null;
+  }
   if (!code) return null;
 
-  const verifier = sessionStorage.getItem('pkce_verifier');
-  if (!verifier) throw new Error('Code verifier manquant');
+  const verifier = getPkceVerifier();
+  if (!verifier) {
+    console.error('[AUTH] Missing PKCE verifier for callback', {
+      redirectUri: REDIRECT_URI,
+      search: window.location.search,
+    });
+    throw new Error('Code verifier manquant');
+  }
+  sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
 
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
@@ -92,11 +124,19 @@ export async function handleCallback() {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
   });
-  if (!res.ok) throw new Error('Échec échange token: ' + res.status);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    console.error('[AUTH] Token exchange failed', {
+      status: res.status,
+      detail,
+      redirectUri: REDIRECT_URI,
+    });
+    throw new Error('Échec échange token: ' + res.status);
+  }
 
   const tokens = await res.json();
-  sessionStorage.removeItem('pkce_verifier');
-  sessionStorage.setItem('spotify_token', JSON.stringify(tokens));
+  clearPkceVerifier();
+  sessionStorage.setItem(SPOTIFY_TOKEN_KEY, JSON.stringify(tokens));
 
   // Nettoyer l'URL
   window.history.replaceState({}, document.title, window.location.pathname);
@@ -108,13 +148,14 @@ export async function handleCallback() {
  * @returns {{access_token: string, expires_in: number}|null}
  */
 export function getStoredTokens() {
-  const raw = sessionStorage.getItem('spotify_token');
+  const raw = sessionStorage.getItem(SPOTIFY_TOKEN_KEY);
   return raw ? JSON.parse(raw) : null;
 }
 
 /** Supprime le token de session — déconnexion. */
 export function logout() {
-  sessionStorage.removeItem('spotify_token');
+  clearPkceVerifier();
+  sessionStorage.removeItem(SPOTIFY_TOKEN_KEY);
 }
 
 /**
@@ -147,7 +188,7 @@ export async function refreshAccessToken() {
       ...tokens,
       refresh_token: tokens.refresh_token ?? stored.refresh_token,
     };
-    sessionStorage.setItem('spotify_token', JSON.stringify(updated));
+    sessionStorage.setItem(SPOTIFY_TOKEN_KEY, JSON.stringify(updated));
     return updated.access_token;
   } catch {
     return null;
