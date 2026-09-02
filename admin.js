@@ -612,8 +612,7 @@ async function queueRequestOnSpotify(row, articleEl) {
       throw new Error('Connexion Spotify nécessaire');
     }
 
-    const queueResult = await addToSpotifyQueue(row, spotifyFetch);
-    if (queueResult.status !== 204) throw new Error(`Spotify queue ${queueResult.status}`);
+    await addToSpotifyQueue(row, spotifyFetch);
     spotifyAdded = true;
 
     const { error } = await supabase.from('song_requests').update({ status: 'queued' }).eq('id', row.id);
