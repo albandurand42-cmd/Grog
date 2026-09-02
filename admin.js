@@ -605,6 +605,7 @@ async function queueRequestOnSpotify(row, articleEl) {
   const btn = articleEl.querySelector('[data-action="queue"]');
   if (!btn || btn.disabled) return;
   btn.disabled = true;
+  let spotifyAdded = false;
 
   try {
     if (!accessToken) {
@@ -613,17 +614,18 @@ async function queueRequestOnSpotify(row, articleEl) {
 
     const queueResult = await addToSpotifyQueue(row, spotifyFetch);
     if (queueResult.status !== 204) throw new Error(`Spotify queue ${queueResult.status}`);
+    spotifyAdded = true;
 
     const { error } = await supabase.from('song_requests').update({ status: 'queued' }).eq('id', row.id);
     if (error) throw error;
 
-    articleEl.remove();
-    if (!requestsList.querySelector('.request-card')) {
-      requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
-    }
+    await loadRequests();
   } catch (error) {
-    console.error('[QUEUE ADMIN] add failed:', error);
-    alert(error?.message || 'Erreur Spotify inconnue');
+    if (spotifyAdded) {
+      console.error('[QUEUE ADMIN] Spotify ajouté mais update song_requests échoué', error);
+    } else {
+      console.error('[QUEUE ADMIN] add failed:', error);
+    }
   } finally {
     btn.disabled = false;
   }
