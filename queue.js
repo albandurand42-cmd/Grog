@@ -101,3 +101,78 @@ export function subscribeToQueue(callback) {
     )
     .subscribe();
 }
+
+function isValidSpotifyTrackId(value) {
+  return /^[A-Za-z0-9]{22}$/.test(value);
+}
+
+function resolveSpotifyTrackUri(request) {
+  const spotifyUri = typeof request?.spotify_uri === 'string' ? request.spotify_uri.trim() : '';
+  if (spotifyUri) {
+    if (/^spotify:track:[A-Za-z0-9]{22}$/.test(spotifyUri)) return spotifyUri;
+    throw new Error(`URI Spotify invalide: ${spotifyUri}`);
+  }
+
+  const trackIdRaw = typeof request?.spotify_track_id === 'string'
+    ? request.spotify_track_id.trim()
+    : typeof request?.spotify_id === 'string'
+      ? request.spotify_id.trim()
+      : '';
+
+  if (!trackIdRaw) throw new Error('Identifiant Spotify manquant pour cette demande');
+  if (!isValidSpotifyTrackId(trackIdRaw)) throw new Error(`ID Spotify invalide: ${trackIdRaw}`);
+
+  return `spotify:track:${trackIdRaw}`;
+}
+
+/**
+ * Ajoute une requête à la file Spotify du compte admin connecté.
+ * @param {object} request
+ * @param {(url: string, init?: RequestInit) => Promise<Response|null>} spotifyFetch
+ * @returns {Promise<{status: number, uri: string, url: string, deviceId: string}>}
+ */
+export async function addToSpotifyQueue(request, spotifyFetch) {
+  console.log('[SPOTIFY QUEUE] track request:', request);
+
+  const uri = resolveSpotifyTrackUri(request);
+
+  const devicesResponse = await spotifyFetch('https://api.spotify.com/v1/me/player/devices');
+  if (!devicesResponse) throw new Error('Connexion Spotify nécessaire');
+  const devicesData = await devicesResponse.json().catch(() => ({ devices: [] }));
+  const devices = Array.isArray(devicesData?.devices) ? devicesData.devices : [];
+  console.log('[SPOTIFY QUEUE] devices:', devices);
+
+  const activeDevice = devices.find((d) => d?.is_active);
+  if (!activeDevice?.id) {
+    throw new Error('Aucun appareil Spotify actif. Lance une musique sur Spotify puis réessaie.');
+  }
+
+  const url = `https://api.spotify.com/v1/me/player/queue?${new URLSearchParams({
+    uri,
+    device_id: activeDevice.id,
+  }).toString()}`;
+
+  const response = await spotifyFetch(url, { method: 'POST' });
+  if (!response) throw new Error('Connexion Spotify nécessaire');
+
+  const responseText = await response.text();
+
+  console.log('[SPOTIFY QUEUE]', {
+    status: response.status,
+    statusText: response.statusText,
+    response: responseText,
+    uri,
+    url,
+    device_id: activeDevice.id,
+  });
+
+  if (response.status !== 204) {
+    const scopeHint = response.status === 403
+      && /insufficient scope|scope/i.test(responseText || response.statusText)
+      ? ' — Scope insuffisant: déconnecte-toi de Spotify puis reconnecte-toi pour régénérer le token OAuth avec user-modify-playback-state.'
+      : '';
+    throw new Error(`Spotify queue ${response.status}: ${responseText || response.statusText}${scopeHint}`);
+  }
+
+  return { status: response.status, uri, url, deviceId: activeDevice.id };
+}

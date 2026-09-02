@@ -2,7 +2,7 @@
 // Gère l'authentification Spotify PKCE, la lecture, les demandes invités, les votes volume et now_playing.
 
 import { startPKCE, handleCallback, getStoredTokens, logout, refreshAccessToken } from './auth.js';
-import { fetchPendingRequests, subscribeToQueue } from './queue.js';
+import { fetchPendingRequests, subscribeToQueue, addToSpotifyQueue } from './queue.js';
 import { supabase } from './supabase.js';
 import { escHtml } from './utils.js';
 import { fetchVolumeScore } from './votes.js';
@@ -606,39 +606,13 @@ async function queueRequestOnSpotify(row, articleEl) {
   if (!btn || btn.disabled) return;
   btn.disabled = true;
 
-  const trackUri = row.spotify_id ? `spotify:track:${row.spotify_id}` : '';
-  if (!trackUri) {
-    console.error('[REQUESTS] Impossible de construire l’URI Spotify', { requestId: row.id, row });
-    alert('Impossible d’ajouter à la file Spotify');
-    btn.disabled = false;
-    return;
-  }
-
   try {
     if (!accessToken) {
       throw new Error('Connexion Spotify nécessaire');
     }
 
-    const queueUrl = `https://api.spotify.com/v1/me/player/queue?${new URLSearchParams({ uri: trackUri }).toString()}`;
-    const res = await spotifyFetch(queueUrl, { method: 'POST' });
-    if (!res) throw new Error('Connexion Spotify nécessaire');
-
-    if (!res.ok) {
-      let detail = '';
-      try {
-        detail = await res.text();
-      } catch {
-        // ignore read error
-      }
-      console.error('[REQUESTS] Spotify queue error', {
-        requestId: row.id,
-        trackUri,
-        status: res.status,
-        body: detail,
-      });
-      if (res.status === 404) throw new Error('Aucun lecteur Spotify actif');
-      throw new Error('Impossible d’ajouter à la file Spotify');
-    }
+    const queueResult = await addToSpotifyQueue(row, spotifyFetch);
+    if (queueResult.status !== 204) throw new Error(`Spotify queue ${queueResult.status}`);
 
     const { error } = await supabase.from('song_requests').update({ status: 'queued' }).eq('id', row.id);
     if (error) throw error;
@@ -647,12 +621,9 @@ async function queueRequestOnSpotify(row, articleEl) {
     if (!requestsList.querySelector('.request-card')) {
       requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
     }
-  } catch (err) {
-    const message = err?.message === 'Aucun lecteur Spotify actif'
-      ? 'Aucun lecteur Spotify actif'
-      : 'Impossible d’ajouter à la file Spotify';
-    console.error('[REQUESTS] Erreur ajout file Spotify', { requestId: row.id, trackUri, error: err });
-    alert(message);
+  } catch (error) {
+    console.error('[QUEUE ADMIN] add failed:', error);
+    alert(error?.message || 'Erreur Spotify inconnue');
   } finally {
     btn.disabled = false;
   }
