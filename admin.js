@@ -621,15 +621,20 @@ async function queueRequestOnSpotify(row, articleEl) {
       .update({ status: 'queued' })
       .eq('id', row.id)
       .select();
-    console.log('[REQUEST QUEUE] DB update', {
+    console.log('[REQUEST QUEUE] status update:', {
       id: row.id,
       data,
       error,
     });
-    if (error) throw error;
+    if (error || !data?.length) {
+      console.error(
+        '[REQUEST QUEUE] DB update failed or no row updated',
+        { request: row, data, error },
+      );
+      return;
+    }
 
-    articleEl.remove();
-    if (!requestsList.querySelector('.request-card')) requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
+    await loadRequests();
   } catch (error) {
     if (spotifyAdded) {
       console.error('[QUEUE ADMIN] Spotify ajouté mais update song_requests échoué', error);
