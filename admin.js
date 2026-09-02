@@ -554,7 +554,7 @@ function resetNowPlayingUI() {
 
 function removeRequestCardById(id) {
   const strId = String(id);
-  requestsList.querySelector(`.request-card[data-id="${CSS.escape(strId)}"]`)?.remove();
+  requestsList.querySelector(`.request-card[data-request-id="${CSS.escape(strId)}"]`)?.remove();
   if (!requestsList.querySelector('.request-card')) {
     requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
   }
@@ -566,13 +566,15 @@ async function loadRequests(source = 'direct') {
     const rows = await fetchPendingRequests();
     if (loadSeq !== _requestsLoadSeq) {
       console.log('[QUEUE DEBUG] stale load ignored', { source, loadSeq, latest: _requestsLoadSeq });
-      return;
+      return null;
     }
     renderRequests(rows);
+    return rows;
   } catch (err) {
     if (loadSeq !== _requestsLoadSeq) return;
     console.error('Erreur chargement demandes :', err);
     requestsList.innerHTML = '<div class="empty-state error-state">Impossible de charger les demandes.</div>';
+    return null;
   }
 }
 
@@ -588,7 +590,7 @@ function renderRequests(rows) {
 function buildRequestItem(row) {
   const article = document.createElement('article');
   article.className = 'request-card';
-  article.dataset.id = row.id;
+  article.dataset.requestId = String(row.id);
   const nameHtml = row.guest_name ? `<span class="muted guest-name">Demandé par ${escHtml(row.guest_name)}</span>` : `<span class="muted guest-name">Anonyme</span>`;
   article.innerHTML = `
     ${row.album_art ? `<img class="cover" src="${escHtml(row.album_art)}" alt="pochette" width="56" height="56" loading="lazy">` : '<div class="cover placeholder" aria-hidden="true"></div>'}
@@ -642,32 +644,33 @@ async function queueRequestOnSpotify(row, articleEl) {
       .update({ status: 'queued' })
       .eq('id', row.id)
       .select();
-    console.log('[QUEUE DEBUG] update result', {
-      id: row.id,
-      data,
-      error,
-    });
     if (error || !data?.length) {
-      console.error(
-        '[REQUEST QUEUE] DB update failed or no row updated',
-        { request: row, data, error },
-      );
+      console.error('[REQUEST QUEUE] update failed', {
+        row,
+        data,
+        error,
+      });
       return;
     }
 
-    const { data: verifyData, error: verifyError } = await supabase
-      .from('song_requests')
-      .select('id,status,title')
-      .eq('id', row.id)
-      .single();
-    console.log('[QUEUE DEBUG] verify row after update', {
-      verifyData,
-      verifyError,
-    });
+    articleEl.remove();
+    if (!requestsList.querySelector('.request-card')) {
+      requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
+    }
 
-    removeRequestCardById(row.id);
-    console.log('[QUEUE DEBUG] reloading requests');
-    await loadRequests('queue-success');
+    console.log(
+      '[REQUEST QUEUE] DOM REMOVED:',
+      row.id,
+      !document.body.contains(articleEl),
+    );
+
+    const rows = await loadRequests('queue-success');
+    if (rows?.some((pendingRow) => String(pendingRow.id) === String(row.id))) {
+      console.error(
+        '[REQUEST QUEUE] WARNING: queued request returned as pending',
+        row.id,
+      );
+    }
   } catch (error) {
     if (spotifyAdded) {
       console.error('[QUEUE ADMIN] Spotify ajouté mais update song_requests échoué', error);
