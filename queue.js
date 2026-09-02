@@ -166,7 +166,7 @@ export async function addToSpotifyQueue(request, spotifyFetch) {
     device_id: activeDevice.id,
   });
 
-  if (response.status !== 204) {
+  if (!response.ok) {
     const scopeHint = response.status === 403
       && /insufficient scope|scope/i.test(responseText || response.statusText)
       ? ' — Scope insuffisant: déconnecte-toi de Spotify puis reconnecte-toi pour régénérer le token OAuth avec user-modify-playback-state.'
