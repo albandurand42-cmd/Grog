@@ -45,6 +45,7 @@ let _lastSyncedTrackId = null;
 let _lastSyncedIsPlaying = null;
 let _lastPeriodicWrite = 0;
 let _syncInterval = null;
+let _requestsLoadSeq = 0;
 const PERIODIC_WRITE_MS = 8000;
 
 async function init() {
@@ -551,11 +552,25 @@ function resetNowPlayingUI() {
   updateNowPlayingAdminUI(null);
 }
 
-async function loadRequests() {
+function removeRequestCardById(id) {
+  const strId = String(id);
+  requestsList.querySelector(`.request-card[data-id="${CSS.escape(strId)}"]`)?.remove();
+  if (!requestsList.querySelector('.request-card')) {
+    requestsList.innerHTML = '<div class="empty-state">Aucune demande pour le moment.</div>';
+  }
+}
+
+async function loadRequests(source = 'direct') {
+  const loadSeq = ++_requestsLoadSeq;
   try {
     const rows = await fetchPendingRequests();
+    if (loadSeq !== _requestsLoadSeq) {
+      console.log('[QUEUE DEBUG] stale load ignored', { source, loadSeq, latest: _requestsLoadSeq });
+      return;
+    }
     renderRequests(rows);
   } catch (err) {
+    if (loadSeq !== _requestsLoadSeq) return;
     console.error('Erreur chargement demandes :', err);
     requestsList.innerHTML = '<div class="empty-state error-state">Impossible de charger les demandes.</div>';
   }
@@ -608,20 +623,26 @@ async function queueRequestOnSpotify(row, articleEl) {
   let spotifyAdded = false;
 
   try {
+    console.log('[QUEUE DEBUG] clicked', {
+      id: row.id,
+      status: row.status,
+      title: row.title,
+    });
+
     if (!accessToken) {
       throw new Error('Connexion Spotify nécessaire');
     }
 
     await addToSpotifyQueue(row, spotifyFetch);
     spotifyAdded = true;
-    console.log('[REQUEST QUEUE] spotify success', row.id);
+    console.log('[QUEUE DEBUG] spotify success', row.id);
 
     const { data, error } = await supabase
       .from('song_requests')
       .update({ status: 'queued' })
       .eq('id', row.id)
       .select();
-    console.log('[REQUEST QUEUE] status update:', {
+    console.log('[QUEUE DEBUG] update result', {
       id: row.id,
       data,
       error,
@@ -634,7 +655,19 @@ async function queueRequestOnSpotify(row, articleEl) {
       return;
     }
 
-    await loadRequests();
+    const { data: verifyData, error: verifyError } = await supabase
+      .from('song_requests')
+      .select('id,status,title')
+      .eq('id', row.id)
+      .single();
+    console.log('[QUEUE DEBUG] verify row after update', {
+      verifyData,
+      verifyError,
+    });
+
+    removeRequestCardById(row.id);
+    console.log('[QUEUE DEBUG] reloading requests');
+    await loadRequests('queue-success');
   } catch (error) {
     if (spotifyAdded) {
       console.error('[QUEUE ADMIN] Spotify ajouté mais update song_requests échoué', error);
@@ -646,8 +679,14 @@ async function queueRequestOnSpotify(row, articleEl) {
   }
 }
 
-function handleRealtimeChange() {
-  loadRequests();
+function handleRealtimeChange(payload) {
+  console.log('[QUEUE DEBUG] realtime payload', payload);
+  if (payload?.eventType === 'DELETE') {
+    removeRequestCardById(payload.old?.id);
+  } else if (payload?.new?.status && payload.new.status !== 'pending') {
+    removeRequestCardById(payload.new.id);
+  }
+  loadRequests('realtime');
 }
 
 async function loadVolumeScore() {

@@ -68,11 +68,19 @@ export async function submitRequest(track, guestName = '') {
 export async function fetchPendingRequests() {
   const { data, error } = await supabase
     .from(TABLE)
-    .select('id, spotify_id, title, artist, album_art, request_count, guest_name, created_at')
+    .select('id, status, spotify_id, title, artist, album_art, request_count, guest_name, created_at')
     .eq('status', 'pending')
     .order('request_count', { ascending: false })
     .order('created_at', { ascending: true });
   if (error) throw error;
+  console.log(
+    '[QUEUE DEBUG] pending after reload',
+    data?.map((r) => ({
+      id: r.id,
+      title: r.title,
+      status: r.status,
+    }))
+  );
   return data ?? [];
 }
 
