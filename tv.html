@@ -318,7 +318,7 @@
     <div class="tv-qr-col">
       <div class="tv-qr-box">
         <a href="https://albandurand42-cmd.github.io/Grog/" target="_blank" rel="noopener">
-          <img src="qr-grog.png" alt="QR code GROG" />
+          <img id="tv-qr-image" src="qr-grog.png" alt="QR code GROG" />
         </a>
       </div>
       <p class="tv-qr-label">Scanne pour demander un son</p>
@@ -335,6 +335,10 @@
 
   <script type="module">
     import { APP_VERSION } from './config.js';
+    const tvQrImage = document.getElementById('tv-qr-image');
+    if (tvQrImage) {
+      tvQrImage.src = `qr-grog.png?v=${encodeURIComponent(APP_VERSION)}`;
+    }
     (async () => {
       try {
         await import(`./tv.js?v=${encodeURIComponent(APP_VERSION)}`);
