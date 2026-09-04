@@ -276,10 +276,6 @@ if (btnSendComment) {
 async function handleSendComment() {
   if (!commentMessageInput) return;
   const message = commentMessageInput.value.trim().slice(0, COMMENT_MAX);
-  if (!message) {
-    showCommentFeedback('Écris un message avant d\'envoyer 😊', false);
-    return;
-  }
   const rawName = guestNameInput ? guestNameInput.value.trim() : '';
   const guest_name = rawName ? rawName.slice(0, NAME_MAX) : null;
 
