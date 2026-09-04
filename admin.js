@@ -852,6 +852,7 @@ function buildPendingCard(row) {
   article.className = 'comment-mod-card';
   article.dataset.id = row.id;
   const time = new Date(row.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const message = typeof row.message === 'string' ? row.message : '';
   article.innerHTML = `
     <div class="comment-mod-meta">
       <strong class="comment-mod-name"></strong>
@@ -865,7 +866,12 @@ function buildPendingCard(row) {
   `;
   article.querySelector('.comment-mod-name').textContent = row.guest_name || 'Anonyme';
   article.querySelector('.comment-mod-time').textContent = time;
-  article.querySelector('.comment-mod-message').textContent = row.message;
+  const messageEl = article.querySelector('.comment-mod-message');
+  if (message.trim()) {
+    messageEl.textContent = message;
+  } else {
+    messageEl.remove();
+  }
   article.querySelector('[data-action="approve"]').addEventListener('click', () => moderateComment(row.id, 'approved'));
   article.querySelector('[data-action="reject"]').addEventListener('click', () => moderateComment(row.id, 'rejected'));
   return article;
@@ -878,6 +884,7 @@ function buildApprovedCard(row) {
   const time = row.approved_at
     ? new Date(row.approved_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     : '';
+  const message = typeof row.message === 'string' ? row.message : '';
   article.innerHTML = `
     <div class="comment-mod-meta">
       <strong class="comment-mod-name"></strong>
@@ -890,7 +897,12 @@ function buildApprovedCard(row) {
   `;
   article.querySelector('.comment-mod-name').textContent = row.guest_name || 'Anonyme';
   article.querySelector('.comment-mod-time').textContent = time;
-  article.querySelector('.comment-mod-message').textContent = row.message;
+  const messageEl = article.querySelector('.comment-mod-message');
+  if (message.trim()) {
+    messageEl.textContent = message;
+  } else {
+    messageEl.remove();
+  }
   article.querySelector('[data-action="remove"]').addEventListener('click', () => moderateComment(row.id, 'rejected'));
   return article;
 }
